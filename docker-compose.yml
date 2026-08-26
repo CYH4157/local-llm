@@ -1,0 +1,57 @@
+# =============================================================================
+#  Docker Compose 版（替代方案）— 需要先裝 Docker Desktop + WSL2
+#
+#  什麼時候用這個？
+#    - 你想要「基礎設施即程式碼」，一個檔案描述整套服務
+#    - 之後想擴充（加 Discord bot、資料庫）比較好管理
+#
+#  啟動：   docker compose up -d
+#  看狀態： docker compose ps
+#  關閉：   docker compose down
+#  拉模型： docker compose exec ollama ollama pull qwen2.5:14b
+#
+#  restart: always = 「不中斷」的關鍵：容器掛了自動重啟、開機自動起。
+#  （這就是不用 k3s 也能達成高可用的方式）
+# =============================================================================
+
+services:
+  # --- 模型引擎 ---------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: always
+    ports:
+      - "11434:11434"          # API（給 Discord bot / 其他程式）
+    volumes:
+      - ollama-models:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia    # 需要 Docker Desktop 啟用 WSL2 GPU
+              count: all
+              capabilities: [gpu]
+
+  # --- 網頁介面 + 聯網搜尋 ----------------------------------------------------
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: always
+    depends_on:
+      - ollama
+    ports:
+      - "8080:8080"            # 瀏覽器開 http://localhost:8080
+    volumes:
+      - webui-data:/app/backend/data
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WEBUI_AUTH=True
+      # 聯網搜尋（DuckDuckGo，免金鑰）
+      - ENABLE_WEB_SEARCH=True
+      - ENABLE_RAG_WEB_SEARCH=True
+      - WEB_SEARCH_ENGINE=duckduckgo
+      - RAG_WEB_SEARCH_ENGINE=duckduckgo
+
+volumes:
+  ollama-models:
+  webui-data:

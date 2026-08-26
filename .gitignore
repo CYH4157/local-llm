@@ -1,0 +1,17 @@
+# === 機密：絕對不能上傳！ ===
+.env
+
+# === Python ===
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# === 資料 / 日誌 ===
+webui-data/
+*.log
+
+# === 作業系統 ===
+Thumbs.db
+.DS_Store
+desktop.ini
