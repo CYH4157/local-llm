@@ -1,188 +1,62 @@
-# 正式部署手冊：Windows + WSL2 + vLLM（手動部署）
+# 維運手冊：WSL2 + vLLM + llama-swap
 
-目標：在 Windows 裡用 WSL2 跑一個 Linux，裡面裝 **vLLM** 當高併發引擎，
-接上 Discord bot，服務約 10 人。
+安裝請先照 [README](README.md) 跑 `deploy.ps1`。這份整理的是**日常維運**與**疑難排解**。
 
-> 這份是給你**親手打指令**用的。每個階段都有「✅ 檢查點」，過了再往下。
-> 可先在**這台筆電**練習（筆電有 Windows + GPU），熟了再照同樣步驟上桌機。
+## 常用指令
 
----
+在 Windows PowerShell 執行（`wsl -e` 會在 Ubuntu 裡執行後面的指令）：
 
-## 架構
-
-```
-Windows（實體機，裝 NVIDIA 驅動）
- └─ WSL2 (Ubuntu)              ← 真正的 Linux 跑在這
-      ├─ vLLM  (port 8000)      ← 引擎，OpenAI 相容 API
-      │    └─ Qwen2.5-7B-Instruct-AWQ 模型
-      └─ discord_bot.py         ← bot 也跑在 WSL 裡，連 localhost:8000
-```
-重點：**vLLM 和 bot 都跑在 WSL 裡**，bot 連 `localhost:8000` 最單純。
-
----
-
-## 階段 A：裝 WSL2 + 確認顯卡（在 Windows 這邊做）
-
-前提：Windows 已裝**最新版 NVIDIA 顯示卡驅動**（到 nvidia.com 下載）。
-⚠️ 不要在 WSL 裡另外裝 Linux 版顯卡驅動——WSL 的 GPU 是靠 Windows 驅動提供的。
-
-1. **系統管理員**開 PowerShell，執行：
-   ```powershell
-   wsl --install
-   ```
-   會自動裝好 WSL2 + Ubuntu，然後**重開機**。
-
-2. 重開機後會自動跳出 Ubuntu 視窗，第一次要你設 **Linux 使用者名稱 + 密碼**（記住這組密碼，之後 `sudo` 會用）。
-
-3. **✅ 檢查點：確認 WSL 裡看得到顯卡**。在 Ubuntu 終端機打：
-   ```bash
-   nvidia-smi
-   ```
-   有看到你的顯卡型號 = GPU 穿透成功 ✅。看不到就停下來先解決（多半是 Windows 驅動太舊）。
-
----
-
-## 階段 B：準備 Python 環境（在 WSL Ubuntu 裡做）
-
-以下都在 Ubuntu 終端機執行。
-
-1. 更新系統：
-   ```bash
-   sudo apt update && sudo apt upgrade -y
-   ```
-
-2. 裝 Python 工具：
-   ```bash
-   sudo apt install -y python3-venv python3-pip git
-   ```
-
-3. 建一個資料夾和虛擬環境：
-   ```bash
-   mkdir -p ~/llm && cd ~/llm
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
-   > 之後每次開新終端機要先 `cd ~/llm && source .venv/bin/activate`。
-   > 看到提示字元前面有 `(.venv)` 就表示在虛擬環境裡。
-
----
-
-## 階段 C：安裝並啟動 vLLM
-
-1. 安裝 vLLM（會一起裝 PyTorch 等，**約 5~8GB，較久**）：
-   ```bash
-   pip install vllm
-   ```
-
-2. **✅ 檢查點**：確認裝好：
-   ```bash
-   vllm --version
-   ```
-
-3. 啟動 vLLM 伺服器（第一次會自動從 HuggingFace 下載模型 ~6GB）：
-   ```bash
-   vllm serve Qwen/Qwen2.5-7B-Instruct-AWQ \
-     --port 8000 \
-     --max-model-len 8192 \
-     --gpu-memory-utilization 0.90
-   ```
-   參數說明：
-   - `--max-model-len 8192`：單次對話長度上限，12GB 顯卡設這個較穩。
-   - `--gpu-memory-utilization 0.90`：讓 vLLM 用到 90% 顯存（剩下留給系統）。
-   看到 `Uvicorn running on http://0.0.0.0:8000` = 成功 ✅。**這個視窗要一直開著**。
-
-4. **✅ 檢查點**：另開一個 Ubuntu 終端機，測 API：
-   ```bash
-   curl http://localhost:8000/v1/chat/completions \
-     -H "Content-Type: application/json" \
-     -d '{"model":"Qwen/Qwen2.5-7B-Instruct-AWQ","messages":[{"role":"user","content":"你好"}]}'
-   ```
-   有回一段 JSON 就成功了。
-
-> 註：vLLM 講的是 **OpenAI 格式的 API**（`/v1/chat/completions`），
-> 跟 Ollama 的 `/api/chat` 不一樣，所以下面 bot 要小改一個函式。
-
----
-
-## 階段 D：接上 Discord bot
-
-1. 把 bot 檔案複製進 WSL（Windows 的 D 槽在 WSL 裡是 `/mnt/c/...`）：
-   ```bash
-   cp /mnt/c/Users/a9756/Documents/llm/local-llm/discord_bot.py ~/llm/
-   cp /mnt/c/Users/a9756/Documents/llm/local-llm/.env ~/llm/
-   pip install discord.py requests python-dotenv ddgs
-   ```
-
-2. 改 `~/llm/.env`（用 `nano ~/llm/.env` 編輯），改成指向 vLLM：
-   ```
-   BACKEND=vllm
-   VLLM_BASE_URL=http://localhost:8000/v1
-   MODEL=Qwen/Qwen2.5-7B-Instruct-AWQ
-   ```
-   （`DISCORD_BOT_TOKEN` 等其他設定保留。）
-
-3. **改 bot 程式**：`discord_bot.py` 原本 `ollama_chat()` 是打 Ollama 的 API。
-   加一個走 vLLM(OpenAI 格式) 的版本，並依 `BACKEND` 切換。把 `ollama_chat` 換成：
-   ```python
-   BACKEND       = os.getenv("BACKEND", "ollama").lower()
-   VLLM_BASE_URL = os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1").rstrip("/")
-
-   def ollama_chat(messages: list[dict]) -> str:
-       msgs = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
-       if BACKEND == "vllm":
-           r = requests.post(f"{VLLM_BASE_URL}/chat/completions",
-                             json={"model": MODEL, "messages": msgs}, timeout=600)
-           r.raise_for_status()
-           return r.json()["choices"][0]["message"]["content"].strip()
-       else:  # ollama
-           r = requests.post(f"{OLLAMA_HOST}/api/chat",
-                             json={"model": MODEL, "messages": msgs, "stream": False}, timeout=600)
-           r.raise_for_status()
-           return r.json()["message"]["content"].strip()
-   ```
-   > 差別只在：vLLM 回傳在 `choices[0].message.content`，Ollama 在 `message.content`。
-   > 其他邏輯（!web、記憶、切訊息）完全不用動。
-
-4. 啟動 bot：
-   ```bash
-   cd ~/llm && source .venv/bin/activate
-   python3 discord_bot.py
-   ```
-   看到 `已上線` 就成功，去 Discord 測。
-
----
-
-## 階段 E：讓它一直跑（正式機才需要）
-
-測試時，兩個終端機開著（一個 vLLM、一個 bot）就好。正式上線要背景常駐：
-
-**簡單法：用 tmux**
-```bash
-sudo apt install -y tmux
-tmux new -s vllm      # 開一個工作階段跑 vLLM，按 Ctrl+b 再按 d 離開但保持執行
-tmux new -s bot       # 再開一個跑 bot
-tmux attach -s vllm   # 想回去看就 attach
+```powershell
+wsl -e systemctl status llama-swap          # 服務狀態
+$k = (Select-String '^LLM_API_KEY=' .env).Line.Split('=',2)[1]   # 讀出金鑰，下面的 curl 要用
+wsl -e journalctl -u llama-swap -n 100      # 最近 100 行紀錄（vLLM 的錯誤也在這）
+wsl -e sudo systemctl restart llama-swap    # 重啟服務
+curl.exe -H "Authorization: Bearer $k" http://127.0.0.1:8080/v1/models   # 列出模型
+curl.exe -H "Authorization: Bearer $k" http://127.0.0.1:8080/running     # 目前載入 GPU 的模型
 ```
 
-**正規法：用 systemd 服務**（開機自動啟動、掛掉自動重啟）——要上正式機時我再給你寫好 service 檔。
+瀏覽器開 http://localhost:8080/ui 是 llama-swap 的管理頁，可以看載入狀態和即時紀錄，也能手動卸載模型。
 
----
+## 手動測試模型
 
-## 常見問題
+```powershell
+curl.exe http://127.0.0.1:8080/v1/chat/completions -H "Content-Type: application/json" -H "Authorization: Bearer $k" `
+  -d '{\"model\":\"qwen3-8b\",\"messages\":[{\"role\":\"user\",\"content\":\"你好\"}]}'
+```
 
-- **`nvidia-smi` 在 WSL 看不到卡** → Windows 的 NVIDIA 驅動太舊，去官網更新最新版。
-- **vLLM 說顯存不夠 (OOM)** → 把 `--max-model-len` 調小（如 4096），或 `--gpu-memory-utilization` 調到 0.85。
-- **模型下載很慢** → 正常，第一次要抓 ~6GB，之後會快取起來。
-- **bot 連不上 vLLM** → 確認 vLLM 那個視窗還開著、`curl` 測得到。
+第一次呼叫某個模型時，會先下載（約 5~6GB）再載入，需要幾分鐘。之後切換大約 30~90 秒。
 
----
+## 顯存（8GB）調校
 
-## 對照：你現在的測試環境 vs 這份
+`wsl/llama-swap.yaml` 裡每個模型的重點參數：
 
-| | 現在（筆電測試） | 這份（正式 ②） |
-|---|---|---|
-| 系統 | Windows 原生 | Windows + WSL2(Ubuntu) |
-| 引擎 | Ollama | vLLM |
-| 模型 | qwen2.5:7b | Qwen2.5-7B-Instruct-AWQ |
-| bot 程式 | 同一支 `discord_bot.py` | 同一支，只改 `ollama_chat` 一個函式 |
-| 多人併發 | 普通 | 強 |
+| 參數 | 作用 | 顯存不夠時 |
+|------|------|-----------|
+| `--max-model-len` | 單次對話（輸入 + 輸出）的 token 上限 | 調小（6144 → 4096） |
+| `--gpu-memory-utilization` | vLLM 可用的顯存比例 | 0.92 → 0.88 |
+| `--max-num-seqs` | 同時處理的請求數 | 4 → 2 |
+| `--enforce-eager` | 不建 CUDA graph：啟動快、省顯存 | 保留 |
+
+常見錯誤訊息：
+- `No available memory for the cache blocks` / `CUDA out of memory`：模型加上下文放不下，照上表調整
+- `max_model_len ... is larger than the maximum number of tokens that can be stored in KV cache`：調小 `--max-model-len`
+- Discord 顯示「內容太長」：用 `!reset` 清除記憶，或縮小 `.env` 的 `HISTORY_MAX_CHARS` / `REF_MAX_CHARS`
+
+改完 yaml 後重跑 `deploy.ps1`（會同步到 `~/llm/llama-swap.yaml`），或直接編輯 WSL 裡那份。llama-swap 會自動重新載入設定。
+
+## 為什麼要「WSL 常駐」排程？
+
+WSL2 在 Windows 端沒有任何程序連著的時候，會自動關閉整個 Linux，裡面的 llama-swap 服務也會一起停。
+`install-autostart.ps1` 註冊的 `LocalLLM-WSL-KeepAlive` 排程會在背景執行 `sleep infinity`，讓 WSL 一直保持運行。
+
+## 換到其他機器（例如 12GB/16GB 桌機）
+
+1. 同樣先裝 WSL2，再跑 `deploy.ps1`
+2. 顯存變大後，可以調大 `wsl/llama-swap.yaml` 的 `--max-model-len`，或加入 14B 模型（例如 `Qwen/Qwen3-14B-AWQ`，建議 16GB 以上）
+3. 多台機器要分流時，前面再加一層 LiteLLM 或 nginx；bot 只需要改 `LLM_BASE_URL`
+
+## 安全性
+
+- llama-swap 一律需要 API 金鑰（`.env` 的 `LLM_API_KEY`）。金鑰在 WSL 裡存成 `~/llm/llama-swap.env`（權限 600），由 systemd 帶入
+- llama-swap 只監聽 `127.0.0.1:8080`，只給本機的 Discord bot 用。WSL 就算是 mirrored 網路（opencode 專案會開），區網也連不到
+- 換金鑰：清空 `.env` 的 `LLM_API_KEY` → `deploy.ps1 -SkipWarmup` → 重啟 bot
