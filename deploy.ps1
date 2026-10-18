@@ -1,7 +1,7 @@
 ﻿<#
     deploy.ps1 — Discord Bot 部署（模型用 opencode 專案在 WSL 架設的 vLLM）
 
-    前提：已經用 opencode 專案的 host\setup-host.cmd 架好 vLLM（:8000）
+    前提：已經用 opencode\host\setup-host.cmd 架好 vLLM（:8000）
     做的事：
         1. 找到 opencode 的 vLLM，確認服務正常、讀得到 API 金鑰
         2. 停用舊版自己架的 llama-swap（避免兩套 vLLM 搶同一張顯卡）
@@ -11,17 +11,19 @@
     用法：
         cd C:\Users\a9756\Documents\llm\local-llm
         powershell -ExecutionPolicy Bypass -File .\deploy.ps1
-        # opencode 資料夾不在預設位置時：
+        # opencode 資料夾不在 repo 的 opencode\ 時：
         powershell -ExecutionPolicy Bypass -File .\deploy.ps1 -OpencodeDir D:\opencode
 #>
 
 param(
-    [string]$OpencodeDir = (Join-Path $env:USERPROFILE "Documents\opencode"),
+    [string]$OpencodeDir = "",
     [string]$Distro = ""
 )
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+# opencode 專案預設就在同一個 repo 的 opencode\ 資料夾
+if (-not $OpencodeDir) { $OpencodeDir = Join-Path $ScriptDir "opencode" }
 
 function Write-Step($m){ Write-Host "`n==== $m ====" -ForegroundColor Cyan }
 function Write-Ok($m)  { Write-Host "  [OK] $m"     -ForegroundColor Green }
@@ -55,7 +57,7 @@ Write-Ok "WSL 發行版：$Distro"
 $vars = "$(wsl.exe -d $Distro -e bash -c '. ~/vllm-server/vllm.env 2>/dev/null; printf %s,%s ${SERVE_PORT:-8000} $SERVE_API_KEY')".Trim()
 $port, $key = $vars -split ',', 2
 if (-not $key) {
-    throw "在 WSL（$Distro）找不到 ~/vllm-server/vllm.env。請先執行 opencode 專案的 host\setup-host.cmd 架好 vLLM。"
+    throw "在 WSL（$Distro）找不到 ~/vllm-server/vllm.env。請先執行 opencode\host\setup-host.cmd 架好 vLLM。"
 }
 if (-not $port) { $port = "8000" }
 $BaseUrl = "http://127.0.0.1:$port/v1"
@@ -65,7 +67,7 @@ try {
     Write-Ok "vLLM 正常：$($m.id)（上下文 $($m.max_model_len)）  $BaseUrl"
 } catch {
     Write-Warn2 "vLLM 目前沒有回應（$($_.Exception.Message)）"
-    Write-Warn2 "設定照樣完成；請在 opencode 資料夾雙擊 host\vllmctl.cmd 輸入 status / start"
+    Write-Warn2 "設定照樣完成；請雙擊 opencode\host\vllmctl.cmd 輸入 status / start"
 }
 
 # --- 2. 停用舊版 llama-swap -------------------------------------------------

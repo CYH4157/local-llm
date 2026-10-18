@@ -1,0 +1,8 @@
+# 在 WSL / Ubuntu 執行的腳本必須是 LF 換行，否則 bash 會出錯
+*.sh text eol=lf
+*.py text eol=lf
+# Windows 腳本：CRLF（.ps1 需含 BOM，PowerShell 5.1 才讀得懂中文）
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.md  text
+*.pptx binary
