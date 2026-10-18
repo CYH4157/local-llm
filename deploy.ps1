@@ -1,28 +1,23 @@
 ﻿<#
-    deploy.ps1 — 本地端 LLM（vLLM + llama-swap on WSL2）+ Discord Bot 部署
+    deploy.ps1 — Discord Bot 部署（模型用 opencode 專案在 WSL 架設的 vLLM）
 
+    前提：已經用 opencode 專案的 host\setup-host.cmd 架好 vLLM（:8000）
     做的事：
-        1. 產生 / 補齊 .env 設定檔（含自動產生 API 金鑰）
-        2. 檢查 WSL2 / Ubuntu 與 GPU
-        3. 在 WSL 裡安裝 vLLM + llama-swap，註冊成開機自動啟動的服務（:8080）
-        4. 在 Windows 建立 Discord bot 的 Python 環境
-
-    前提：已經裝好 WSL2 + Ubuntu（沒裝的話本腳本會告訴你怎麼裝）
+        1. 找到 opencode 的 vLLM，確認服務正常、讀得到 API 金鑰
+        2. 停用舊版自己架的 llama-swap（避免兩套 vLLM 搶同一張顯卡）
+        3. 建立 Discord bot 的 Python 環境
+        4. 產生 / 更新 .env
 
     用法：
         cd C:\Users\a9756\Documents\llm\local-llm
         powershell -ExecutionPolicy Bypass -File .\deploy.ps1
-        # 只更新 bot、不動 WSL 端：
-        powershell -ExecutionPolicy Bypass -File .\deploy.ps1 -SkipWsl
-        # 不要預先下載模型（之後第一次提問才下載）：
-        powershell -ExecutionPolicy Bypass -File .\deploy.ps1 -SkipWarmup
+        # opencode 資料夾不在預設位置時：
+        powershell -ExecutionPolicy Bypass -File .\deploy.ps1 -OpencodeDir D:\opencode
 #>
 
 param(
-    [string]$Distro = "Ubuntu",
-    [string]$DefaultModel = "qwen3-8b",
-    [switch]$SkipWsl,
-    [switch]$SkipWarmup
+    [string]$OpencodeDir = (Join-Path $env:USERPROFILE "Documents\opencode"),
+    [string]$Distro = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,130 +32,96 @@ function Refresh-Path {
     $u=[System.Environment]::GetEnvironmentVariable("Path","User")
     $env:Path="$m;$u"
 }
-function Get-EnvValue($file, $key) {
-    $line = Get-Content $file -Encoding UTF8 | Where-Object { $_ -match "^\s*$key=" } | Select-Object -First 1
-    if ($line) { return ($line -split '=', 2)[1].Trim() } else { return "" }
-}
-
-# --- 0. 前置檢查 ------------------------------------------------------------
-Write-Step "0. 前置檢查"
-if (Test-Command "nvidia-smi") {
-    Write-Ok "GPU：$((nvidia-smi --query-gpu=name,memory.total --format=csv,noheader) 2>$null)"
-} else {
-    throw "找不到 nvidia-smi：請先安裝最新版 NVIDIA 顯示卡驅動（vLLM 需要 NVIDIA GPU）。"
-}
-
-# --- 1. 產生 / 補齊 .env ----------------------------------------------------
-Write-Step "1. 設定檔"
-$envFile = Join-Path $ScriptDir ".env"
-$example = Join-Path $ScriptDir ".env.example"
-if (-not (Test-Path $envFile)) {
-    Copy-Item $example $envFile
-    (Get-Content $envFile -Encoding UTF8) -replace '^DEFAULT_MODEL=.*', "DEFAULT_MODEL=$DefaultModel" |
-        Set-Content $envFile -Encoding UTF8
-    Write-Ok "已建立 .env（記得填入 DISCORD_BOT_TOKEN）"
-} else {
-    # 舊版（Ollama）.env 升級：把新版才有的設定補在最後，已有的不動
-    $have = (Get-Content $envFile -Encoding UTF8) | ForEach-Object { ($_ -split '=', 2)[0].Trim() }
-    $added = @()
-    foreach ($line in (Get-Content $example -Encoding UTF8)) {
-        if ($line -match '^\s*([A-Z_]+)=') {
-            $key = $Matches[1]
-            if ($have -notcontains $key) {
-                if ($key -eq "DEFAULT_MODEL") { $line = "DEFAULT_MODEL=$DefaultModel" }
-                $added += $line
-            }
-        }
+$Utf8NoBom = New-Object Text.UTF8Encoding $false
+function Set-EnvValue($file, $key, $value) {
+    $lines = @([IO.File]::ReadAllLines($file, [Text.Encoding]::UTF8))
+    $found = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match "^\s*$key=") { $lines[$i] = "$key=$value"; $found = $true }
     }
-    if ($added.Count -gt 0) {
-        Add-Content $envFile -Encoding UTF8 -Value (@("", "# === 以下為升級 vLLM 版時自動補上 ===") + $added)
-        Write-Ok ".env 已補上：$(($added | ForEach-Object { ($_ -split '=')[0] }) -join ', ')"
-    } else {
-        Write-Ok ".env 已是最新"
-    }
+    if (-not $found) { $lines += "$key=$value" }
+    [IO.File]::WriteAllLines($file, [string[]]$lines, $Utf8NoBom)
 }
 
-# API 金鑰：.env 沒有就自動產生一組（bot 與 llama-swap 共用）
-$ApiKey = Get-EnvValue $envFile "LLM_API_KEY"
-if (-not $ApiKey) {
-    $bytes = New-Object byte[] 16
-    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
-    $ApiKey = "sk-lab-" + (($bytes | ForEach-Object { $_.ToString("x2") }) -join "")
-    (Get-Content $envFile -Encoding UTF8) -replace '^\s*LLM_API_KEY=.*', "LLM_API_KEY=$ApiKey" |
-        Set-Content $envFile -Encoding UTF8
-    Write-Ok "已產生 API 金鑰並寫入 .env 的 LLM_API_KEY"
+# --- 1. 找到 opencode 的 vLLM -----------------------------------------------
+Write-Step "1. 檢查 opencode 專案的 vLLM"
+if (-not $Distro) {
+    $df = Join-Path $OpencodeDir "host\wsl-distro.txt"
+    $Distro = if (Test-Path $df) { (Get-Content $df -Raw).Trim() } else { "Ubuntu" }
+}
+Write-Ok "WSL 發行版：$Distro"
+
+# 指令裡不能有雙引號（PowerShell 5.1 傳給 wsl.exe 會被吃掉）
+$vars = "$(wsl.exe -d $Distro -e bash -c '. ~/vllm-server/vllm.env 2>/dev/null; printf %s,%s ${SERVE_PORT:-8000} $SERVE_API_KEY')".Trim()
+$port, $key = $vars -split ',', 2
+if (-not $key) {
+    throw "在 WSL（$Distro）找不到 ~/vllm-server/vllm.env。請先執行 opencode 專案的 host\setup-host.cmd 架好 vLLM。"
+}
+if (-not $port) { $port = "8000" }
+$BaseUrl = "http://127.0.0.1:$port/v1"
+try {
+    $models = Invoke-RestMethod "$BaseUrl/models" -TimeoutSec 15 -Headers @{ Authorization = "Bearer $key" }
+    $m = $models.data[0]
+    Write-Ok "vLLM 正常：$($m.id)（上下文 $($m.max_model_len)）  $BaseUrl"
+} catch {
+    Write-Warn2 "vLLM 目前沒有回應（$($_.Exception.Message)）"
+    Write-Warn2 "設定照樣完成；請在 opencode 資料夾雙擊 host\vllmctl.cmd 輸入 status / start"
+}
+
+# --- 2. 停用舊版 llama-swap -------------------------------------------------
+Write-Step "2. 檢查舊版 llama-swap"
+$old = "$(wsl.exe -d $Distro -e bash -c 'systemctl is-enabled llama-swap 2>/dev/null || true')".Trim()
+if ($old -and $old -ne "not-found") {
+    Write-Warn2 "發現舊版 llama-swap 服務（$old），停用中以釋放顯卡（可能要輸入 Ubuntu 密碼）…"
+    wsl.exe -d $Distro -e bash -c "sudo systemctl disable --now llama-swap"
+    Write-Ok "已停用（~/llm 資料夾不再使用，可自行刪除）"
 } else {
-    Write-Ok "使用 .env 裡現有的 API 金鑰"
-}
-if ($ApiKey -notmatch '^[A-Za-z0-9_\-]+$') { throw "LLM_API_KEY 只能包含英數字、- 和 _" }
-
-# --- 2. WSL 端：vLLM + llama-swap -------------------------------------------
-if ($SkipWsl) {
-    Write-Step "2. WSL 端（略過）"
-} else {
-    Write-Step "2. 檢查 WSL2 / $Distro"
-    $distros = @()
-    try { $distros = (wsl.exe -l -q) -replace "`0", "" | Where-Object { $_.Trim() } | ForEach-Object { $_.Trim() } } catch {}
-    if ($distros -notcontains $Distro) {
-        Write-Warn2 "找不到 WSL 的 $Distro。請："
-        Write-Host  "     1) 以『系統管理員』開 PowerShell 執行： wsl --install -d $Distro"
-        Write-Host  "     2) 重新開機，依提示設定 Ubuntu 使用者名稱與密碼"
-        Write-Host  "     3) 再執行一次本腳本"
-        exit 1
-    }
-    Write-Ok "$Distro 已安裝"
-
-    Write-Step "3. 在 WSL 安裝 vLLM + llama-swap（會要求輸入 Ubuntu 密碼）"
-    $wslDir = (wsl.exe -d $Distro -e wslpath -a ($ScriptDir + "\wsl")).Trim()
-    $skip = if ($SkipWarmup) { "1" } else { "0" }
-    # 先轉成 LF 換行再執行，避免 Git 在 Windows 把 .sh 轉成 CRLF 造成 bash 錯誤
-    $cmd = "tr -d '\r' < '$wslDir/setup-wsl.sh' > /tmp/setup-wsl.sh && SRC_DIR='$wslDir' DEFAULT_MODEL='$DefaultModel' SKIP_WARMUP='$skip' LLAMA_SWAP_API_KEY='$ApiKey' bash /tmp/setup-wsl.sh"
-    wsl.exe -d $Distro -e bash -c $cmd
-    if ($LASTEXITCODE -eq 2) {
-        Write-Warn2 "剛開啟 WSL 的 systemd，需要重啟 WSL（會關閉所有 WSL 視窗）…"
-        wsl.exe --shutdown
-        Start-Sleep 5
-        wsl.exe -d $Distro -e bash -c $cmd
-    }
-    if ($LASTEXITCODE -ne 0) { throw "WSL 端安裝失敗（exit $LASTEXITCODE），請看上方訊息。" }
-    Write-Ok "WSL 端完成"
+    Write-Ok "沒有舊版服務"
 }
 
-# --- 4. 安裝 uv（Python 管理器）--------------------------------------------
-Write-Step "4. 安裝 uv（Python 管理器）"
-if (Test-Command "uv") { Write-Ok "uv 已安裝" }
-else {
+# --- 3. 安裝 uv + bot 的 Python 環境 ----------------------------------------
+Write-Step "3. 建立 Discord bot 的 Python 環境"
+if (-not (Test-Command "uv")) {
     if (-not (Test-Command "winget")) { throw "找不到 winget，請手動安裝 uv：https://docs.astral.sh/uv/" }
     winget install --id astral-sh.uv --silent --accept-source-agreements --accept-package-agreements
     Refresh-Path
     if (-not (Test-Command "uv")) { throw "uv 裝完找不到指令，請重開 PowerShell 再跑一次。" }
-    Write-Ok "uv 安裝完成"
 }
-
-# --- 5. 建立 bot 的 Python 環境 --------------------------------------------
-Write-Step "5. 建立 Discord bot 的 Python 環境"
 Push-Location $ScriptDir
 if (-not (Test-Path ".venv\Scripts\python.exe")) { uv venv --python 3.11 .venv }
-$venvPy = Join-Path $ScriptDir ".venv\Scripts\python.exe"
-uv pip install --python $venvPy -r (Join-Path $ScriptDir "requirements.txt")
+uv pip install --python (Join-Path $ScriptDir ".venv\Scripts\python.exe") -r (Join-Path $ScriptDir "requirements.txt")
 Pop-Location
 Write-Ok "套件安裝完成"
 
-# --- 6. 連線測試 ------------------------------------------------------------
-Write-Step "6. 測試 Windows → WSL 模型服務"
-try {
-    $models = Invoke-RestMethod "http://127.0.0.1:8080/v1/models" -TimeoutSec 10 `
-              -Headers @{ Authorization = "Bearer $ApiKey" }
-    Write-Ok "可用模型：$(($models.data | ForEach-Object { $_.id }) -join ', ')"
-} catch {
-    Write-Warn2 "連不到 http://127.0.0.1:8080（$($_.Exception.Message)）"
-    Write-Warn2 "檢查：wsl -d $Distro -e systemctl status llama-swap"
+# --- 4. .env ----------------------------------------------------------------
+Write-Step "4. 設定檔 .env"
+$envFile = Join-Path $ScriptDir ".env"
+$example = Join-Path $ScriptDir ".env.example"
+if (-not (Test-Path $envFile)) {
+    Copy-Item $example $envFile
+    Write-Ok "已建立 .env（記得填入 DISCORD_BOT_TOKEN）"
+} else {
+    # 舊版 .env 升級：補上新設定，已有的不動
+    $have = [IO.File]::ReadAllLines($envFile, [Text.Encoding]::UTF8) | ForEach-Object { ($_ -split '=', 2)[0].Trim() }
+    $added = @()
+    foreach ($line in [IO.File]::ReadAllLines($example, [Text.Encoding]::UTF8)) {
+        if ($line -match '^\s*([A-Z_]+)=' -and $have -notcontains $Matches[1]) { $added += $line }
+    }
+    if ($added.Count -gt 0) {
+        [IO.File]::AppendAllLines($envFile, [string[]](@("", "# === 以下為更新時自動補上 ===") + $added), $Utf8NoBom)
+        Write-Ok ".env 已補上：$(($added | ForEach-Object { ($_ -split '=')[0] }) -join ', ')"
+    }
 }
+Set-EnvValue $envFile "LLM_BASE_URL" $BaseUrl
+Set-EnvValue $envFile "WSL_DISTRO" $Distro
+# 金鑰留空 = bot 自動從 WSL 讀（vllmctl new-key 換金鑰後也不用改）；舊版 llama-swap 的金鑰一併清掉
+Set-EnvValue $envFile "LLM_API_KEY" ""
+Write-Ok "LLM_BASE_URL=$BaseUrl、WSL_DISTRO=$Distro、LLM_API_KEY 留空（自動從 WSL 讀取）"
 
 # --- 完成 -------------------------------------------------------------------
 Write-Step "完成！"
 Write-Host ""
 Write-Host "  1) .env 填好 DISCORD_BOT_TOKEN（建立 bot 的步驟見 README）" -ForegroundColor Cyan
 Write-Host "  2) 啟動 bot：雙擊 start-bot.bat" -ForegroundColor Cyan
-Write-Host "  3) 正式使用：以系統管理員執行 install-autostart.ps1（開機自動啟動 WSL 服務 + bot）" -ForegroundColor Cyan
+Write-Host "  3) 開機自動啟動：以系統管理員執行 install-autostart.ps1" -ForegroundColor Cyan
 Write-Host ""

@@ -1,52 +1,43 @@
-# 本地端 LLM + Discord Bot（vLLM 版）
+# 實驗室 Discord Bot（接 vLLM）
 
-在實驗室筆電（RTX 4070 Laptop 8GB）用 **vLLM** 跑本地模型，透過 Discord bot 提供快速問答、上網查詢，以及產生 **PowerPoint / Word / Excel** 草稿（研究計畫、投影片、課堂報告）。
-
-> 實驗室成員用 **opencode** 連線寫程式、寫作，是另一個專案 `Documents\opencode`（vLLM :8000），不在這裡。
+Discord bot 提供快速問答、上網查詢，以及產生 **PowerPoint / Word / Excel** 草稿（研究計畫、投影片、課堂報告）。
+模型**不在這個專案架設**，而是直接使用 opencode 專案（`Documents\opencode`）在筆電 WSL 裡架的 vLLM。
+opencode 和 Discord bot 共用同一個模型、同一張顯卡。
 
 ## 架構
 
 ```
 Windows 筆電
-├─ WSL2 (Ubuntu)
-│   └─ llama-swap :8080（systemd 服務，開機自動啟動，只聽本機、需 API 金鑰）
-│        │  依 request 的 model 名稱自動啟動 / 切換 vLLM，閒置 30 分鐘自動卸載釋放 GPU
-│        ├─ vLLM: qwen3-8b    Qwen3-8B-AWQ（預設，寫作品質最好，上下文 6k）
-│        ├─ vLLM: qwen3-4b    Qwen3-4B-Instruct-2507-FP8（快、上下文 12k）
-│        └─ vLLM: qwen2.5-7b  Qwen2.5-7B-Instruct-AWQ（備用）
-└─ Discord Bot（Python，Windows 端）→ http://127.0.0.1:8080/v1（OpenAI 相容 API）
+├─ WSL2 Ubuntu
+│   └─ vLLM :8000（opencode 專案架設；systemd 服務 vllm，需 API 金鑰）
+│        ▲                         ▲
+│        │                         └── 同學電腦的 opencode（http://筆電IP:8000/v1）
+├─ opencode（筆電本機）──────────────┤
+└─ Discord Bot（本專案）─────────────┘ http://127.0.0.1:8000/v1
      ├─ 聊天 / !web
-     ├─ !ppt / !word / !excel → 模型輸出 JSON（vLLM 強制符合 schema）→ python-pptx / python-docx / openpyxl
-     └─ !model <名稱>        → 切換模型（全體共用）
+     └─ !ppt / !word / !excel → 模型輸出 JSON（vLLM 強制符合 schema）→ python-pptx / python-docx / openpyxl
 ```
 
-**為什麼要加 llama-swap？** vLLM 一個程序只能載一個模型，而且啟動就會先佔住顯存。
-llama-swap 放在 vLLM 前面，負責「切換模型」和「閒置時卸載」。bot 切換模型只需要換 model 名稱。
+- **模型**：bot 每次自動問 vLLM 目前載入哪個模型，筆電用 `vllmctl` 換模型後 **bot 不用改任何設定**。
+- **金鑰**：bot 自動從 WSL 的 `~/vllm-server/vllm.env` 讀取，筆電換金鑰後 **bot 也會自動重讀**。
 
 ---
 
 ## 安裝
 
-### 1. 裝 WSL2（只需一次）
-以**系統管理員**開 PowerShell：
-```powershell
-wsl --install -d Ubuntu
-```
-重開機後依提示設定 Ubuntu 使用者名稱與密碼。Windows 端要裝最新版 NVIDIA 驅動（**不要**在 Ubuntu 裡另外裝驅動）。
+### 1. 先架好 vLLM
+照 opencode 專案的 README 雙擊 `host\setup-host.cmd`。已經架好就跳過這一步。
 
 ### 2. 跑部署腳本
 ```powershell
 cd C:\Users\a9756\Documents\llm\local-llm
 powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 ```
-腳本會：在 WSL 裝 vLLM + llama-swap 並註冊服務 → 預先下載預設模型 → 建 Windows 端 bot 環境 → 產生或補齊 `.env`。
-中途會要你輸入 Ubuntu 密碼。第一次大約要下載 15GB（vLLM 約 8GB、模型約 6GB）。
-
-| 參數 | 說明 |
-|------|------|
-| `-SkipWsl` | 只更新 bot，不動 WSL 端 |
-| `-SkipWarmup` | 不預先下載模型（第一次提問時才下載） |
-| `-DefaultModel qwen3-4b` | 換預設模型 |
+腳本會：
+1. 確認 vLLM 正常
+2. 停用舊版自己架的 llama-swap（避免兩套 vLLM 搶顯卡）
+3. 建立 bot 的 Python 環境
+4. 自動填好 `.env` 的連線設定
 
 ### 3. 建立 Discord Bot、拿 Token
 1. 到 https://discord.com/developers/applications → **New Application**
@@ -58,9 +49,7 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 
 ### 4. 啟動
 - 測試：雙擊 `start-bot.bat`
-- 正式：以**系統管理員**執行 `install-autostart.ps1`，登入時會自動啟動 WSL 常駐和 bot，bot 掛掉也會自動重啟
-
-> 筆電請插電，並把「接上電源時的睡眠」設為永不。
+- 正式：以**系統管理員**執行 `install-autostart.ps1`，登入時自動啟動 bot，掛掉也會自動重啟。WSL 常駐由 opencode 專案的 `vLLM-WSL-KeepAlive` 排程負責
 
 ---
 
@@ -75,8 +64,7 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 | `!word 報告 <主題>` | 課堂報告 .docx |
 | `!word <需求>` | 一般文件 .docx |
 | `!excel <需求>` | Excel 表格 .xlsx（可含公式，如預算表的小計和總計） |
-| `!model` / `!model <名稱>` | 查看 / 切換模型（全體共用，會記住） |
-| `!status` | 看 GPU 上目前載入哪個模型 |
+| `!model` | 查看目前的模型（和 opencode 共用） |
 | `!reset` | 清空此頻道記憶 |
 | `!help` | 說明 |
 
@@ -85,9 +73,80 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 
 **範本**：把實驗室的 `ppt_template.pptx`、`word_template.docx` 放進 [templates/](templates/README.md) 就會自動套用。
 
-**使用建議**
-- 要附長篇 PDF 產報告時，先 `!model qwen3-4b`（上下文較長），並把 `.env` 的 `REF_MAX_CHARS` 調到約 8000
-- 8B 模型產出的是**草稿**。參考文獻一律標為「[待補]」，模型被要求不可捏造文獻；數據和論述都請人工查證
+> 本地小模型產出的是**草稿**。參考文獻一律標為「[待補]」，模型被要求不可捏造文獻；數據和論述都請人工查證。
+
+---
+
+## API 金鑰怎麼取得
+
+vLLM 的金鑰只有**一組**，存在筆電 WSL 的 `~/vllm-server/vllm.env`（`SERVE_API_KEY`）。opencode 和 Discord bot 都用這組。
+
+| 我要… | 做法 |
+|------|------|
+| **看目前的金鑰**（要給同學時） | 在 opencode 資料夾雙擊 `host\vllmctl.cmd`，輸入 `info`，會印出網址和金鑰 |
+| **換一組新金鑰**（有人離開、金鑰外流） | `vllmctl.cmd` 輸入 `new-key`，舊金鑰立刻失效 |
+| 指定自己取的金鑰 | `vllmctl.cmd` 輸入 `new-key sk-lab-自己取的名字` |
+| 換金鑰後：**Discord bot** | **不用動**。bot 遇到「金鑰錯誤」會自動從 WSL 重讀 |
+| 換金鑰後：**筆電的 opencode** | 執行 `client\install-client.cmd -Url http://127.0.0.1:8000/v1 -SkipInstall`（本機會自動讀金鑰，不用貼） |
+| 換金鑰後：**同學的 opencode** | 把新金鑰私下傳給同學，同學雙擊 `client\install-client.cmd`，貼上網址和新金鑰 |
+
+**Hugging Face token**（`hf_` 開頭）是另一種東西：只有下載**需要授權的模型**（Llama、Gemma 等）才需要，Qwen 系列不用。
+1. 到該模型的 Hugging Face 頁面按同意授權條款
+2. 到 [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) 建立 **Read** 權限的 token
+3. `vllmctl.cmd` 輸入 `set HF_TOKEN hf_xxxxxxxx`
+
+> `.env` 的 `LLM_API_KEY` 請**留空**，讓 bot 自動讀取。只有 bot 不在筆電上執行（讀不到 WSL）時才需要填。
+
+---
+
+## vLLM 換新模型，怎麼套進 opencode
+
+vLLM 一次只載入**一個**模型，換模型就是「下載新的 → 換掉舊的」。opencode、Discord bot 都會改用新模型。
+
+### 步驟 1：在筆電換模型
+在 opencode 資料夾雙擊 `host\vllmctl.cmd`，二選一：
+
+**用內建組合**（最簡單，參數都調好了）：
+```
+presets              ← 列出可用組合
+preset quality       ← 換成 Qwen3-8B
+preset laptop        ← 換回預設的 Qwen3-4B（實測建議）
+```
+
+**用任意 Hugging Face 模型**：
+```
+model Qwen/Qwen3-8B-AWQ qwen3-8b 32768 hermes
+```
+
+| 欄位 | 說明 |
+|------|------|
+| `Qwen/Qwen3-8B-AWQ` | Hugging Face 上的模型 ID（到 huggingface.co 搜尋，複製頁面標題那串） |
+| `qwen3-8b` | 在 opencode 裡顯示的名字（自己取，英數字） |
+| `32768` | 上下文長度。opencode 至少要 16384，建議 32768；顯存不夠就調小 |
+| `hermes` | tool calling 解析器。Qwen2.5 / Qwen3 用 `hermes`，Qwen3-Coder 用 `qwen3_coder` |
+
+`vllmctl` 會**先下載完才切換**，所以下載期間大家照常使用，切換時服務中斷約 1 分鐘。
+選模型時，**模型一定要支援 tool calling**（opencode 讀寫檔案要用），而且權重加上下文要放得進顯卡，詳見 opencode 使用教學第 7 章。
+
+### 步驟 2：確認新模型正常
+`vllmctl.cmd` 輸入 `bench`，大約 1 分鐘，會檢查速度、長文件、工具呼叫。
+
+### 步驟 3：更新每一台的 opencode 設定
+opencode 的設定檔（`%USERPROFILE%\.config\opencode\opencode.json`）記著模型名稱和上下文長度，換模型後要更新：
+
+| 電腦 | 做法 |
+|------|------|
+| 筆電本機 | `client\install-client.cmd -Url http://127.0.0.1:8000/v1 -SkipInstall` |
+| 同學（Windows） | 再雙擊一次 `client\install-client.cmd`，貼上同樣的網址和金鑰 |
+| 同學（Ubuntu） | 重跑 `bash client/install-client.sh --url … --key … --name laptop` |
+
+腳本會自動抓 vLLM 目前的模型和上下文，寫進 opencode 設定，原本指向舊模型的預設值也會自動改成新模型。
+完成後開啟 opencode，輸入 `/models` 確認看到新模型。
+
+### 步驟 4：Discord bot
+**不用做任何事**。在 Discord 輸入 `!model` 可以確認 bot 已經在用新模型。
+
+> 如果新模型的上下文變小（例如換成 16k 的 `small` 組合），建議把 `.env` 的 `REF_MAX_CHARS` 調到 5000，再重啟 bot。
 
 ---
 
@@ -95,9 +154,9 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 
 | 變數 | 說明 |
 |------|------|
-| `LLM_BASE_URL` | llama-swap 位址，預設 `http://127.0.0.1:8080/v1` |
-| `LLM_API_KEY` | API 金鑰（deploy.ps1 自動產生並同步到 WSL） |
-| `DEFAULT_MODEL` | 預設模型（`!model` 切換後會存在 `bot_state.json`，優先使用） |
+| `LLM_BASE_URL` | vLLM 位址，預設 `http://127.0.0.1:8000/v1`（deploy.ps1 自動填） |
+| `WSL_DISTRO` | vLLM 所在的 WSL 發行版（deploy.ps1 自動填） |
+| `LLM_API_KEY` | 留空 = 自動從 WSL 讀取（建議） |
 | `SYSTEM_PROMPT` | bot 個性 |
 | `MAX_HISTORY` / `HISTORY_MAX_CHARS` | 對話記憶則數和總字數上限 |
 | `REF_MAX_CHARS` | 附件參考資料字數上限 |
@@ -106,22 +165,23 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 | `ALLOWED_CHANNEL_ID` | 限定一般聊天的頻道 |
 | `SEARCH_ENGINE` / `GOOGLE_API_KEY` / `GOOGLE_CSE_ID` | 聯網搜尋（沒設定時會自動改用 DuckDuckGo） |
 
-## 新增 / 調整模型
-編輯 `wsl/llama-swap.yaml` → 重跑 `deploy.ps1`（或在 WSL 裡複製到 `~/llm/llama-swap.yaml`，llama-swap 偵測到變更會自動重新載入）。
-在 Discord 輸入 `!model` 就會看到新的模型。顯存調校方式寫在該檔開頭的註解。
+## 疑難排解
+
+| 症狀 | 處理 |
+|------|------|
+| Discord 顯示「連不上筆電上的 vLLM」 | `vllmctl.cmd` 輸入 `status`；沒在跑就 `start` |
+| 顯示「API 金鑰錯誤」 | `.env` 的 `LLM_API_KEY` 清空，重啟 bot |
+| 顯示「內容太長」 | `!reset` 清記憶，或縮短附件；常發生就調小 `REF_MAX_CHARS` |
+| 回應很慢 | 同學正在大量使用 opencode（共用同一張顯卡），稍等即可 |
 
 ## 檔案清單
 | 檔案 | 用途 |
 |------|------|
 | `discord_bot.py` | Discord bot 本體（指令處理） |
-| `llm_client.py` | 呼叫 OpenAI 相容 API、JSON 結構化輸出 |
+| `llm_client.py` | 呼叫 vLLM、自動讀金鑰與模型、JSON 結構化輸出 |
 | `office_gen.py` | JSON schema、提示詞、pptx/docx/xlsx 排版 |
-| `wsl/llama-swap.yaml` | 模型清單與 vLLM 參數 |
-| `wsl/setup-wsl.sh` | WSL 端安裝（vLLM、llama-swap、systemd） |
-| `deploy.ps1` | 一鍵部署（Windows 端） |
-| `install-autostart.ps1` | 開機自動啟動（WSL 常駐 + bot） |
+| `deploy.ps1` | 一鍵部署 |
+| `install-autostart.ps1` | bot 開機自動啟動 |
 | `run-bot.ps1` / `start-bot.bat` | 手動啟動 bot |
 | `templates/` | 實驗室自訂範本（選用） |
 | `outputs/` | 產出的檔案（不進 git） |
-
-維運與疑難排解請看 [DEPLOY.md](DEPLOY.md)。

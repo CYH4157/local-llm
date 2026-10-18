@@ -1,5 +1,5 @@
 """
-discord_bot.py — 把本地 vLLM 模型（經 llama-swap）接到 Discord。
+discord_bot.py — 把實驗室筆電上的 vLLM（opencode 專案架設的那台）接到 Discord。
 
 指令：
     (直接聊天)                在允許的頻道發訊息、@提及 bot、或私訊 → 一般問答（離線）
@@ -7,9 +7,7 @@ discord_bot.py — 把本地 vLLM 模型（經 llama-swap）接到 Discord。
     !ppt <主題/需求>          產生 PowerPoint (.pptx)
     !word [計畫|報告] <需求>  產生 Word (.docx)；計畫=國科會計畫格式、報告=課堂報告
     !excel <需求>             產生 Excel (.xlsx)
-    !model                    顯示目前模型與可用模型
-    !model <名稱>             切換模型（全體共用，第一次載入約 1~3 分鐘）
-    !status                   看 GPU 上目前載入的模型
+    !model                    顯示筆電 vLLM 目前載入的模型（換模型請在筆電用 vllmctl）
     !reset                    清空這個頻道的對話記憶
     !help                     顯示說明
 
@@ -20,7 +18,6 @@ discord_bot.py — 把本地 vLLM 模型（經 llama-swap）接到 Discord。
 import asyncio
 import functools
 import io
-import json
 import os
 import time
 
@@ -37,13 +34,12 @@ import office_gen  # noqa: E402
 
 # --- 讀設定 -----------------------------------------------------------------
 TOKEN          = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
-DEFAULT_MODEL  = os.getenv("DEFAULT_MODEL", "qwen3-8b").strip()
 SYSTEM_PROMPT  = os.getenv("SYSTEM_PROMPT", "你是研究室的 AI 助理，請用台灣繁體中文回答。")
 MAX_HISTORY    = int(os.getenv("MAX_HISTORY", "10"))
-# 記憶的總字數上限（8GB 顯卡上下文約 8k tokens，別塞太多）
-HISTORY_CHARS  = int(os.getenv("HISTORY_MAX_CHARS", "4000"))
+# 記憶的總字數上限（vLLM 的上下文和 opencode 的同學共用，別塞太多）
+HISTORY_CHARS  = int(os.getenv("HISTORY_MAX_CHARS", "8000"))
 # 附件 / 回覆訊息當參考資料時，最多讀幾個字
-REF_MAX_CHARS  = int(os.getenv("REF_MAX_CHARS", "3000"))
+REF_MAX_CHARS  = int(os.getenv("REF_MAX_CHARS", "10000"))
 TO_TRADITIONAL = os.getenv("TO_TRADITIONAL", "1").strip() not in ("0", "false", "False", "")
 _allowed       = os.getenv("ALLOWED_CHANNEL_ID", "").strip()
 ALLOWED_CHANNEL_ID = int(_allowed) if _allowed.isdigit() else None
@@ -52,7 +48,6 @@ SEARCH_ENGINE  = os.getenv("SEARCH_ENGINE", "google").strip().lower()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
 GOOGLE_CSE_ID  = os.getenv("GOOGLE_CSE_ID", "").strip()
 
-STATE_FILE = os.path.join(BASE_DIR, "bot_state.json")
 
 if not TOKEN or TOKEN.startswith("貼上"):
     raise SystemExit("請先在 .env 填入 DISCORD_BOT_TOKEN")
@@ -81,26 +76,6 @@ def tw_obj(obj):
         return {k: tw_obj(v) for k, v in obj.items()}
     return obj
 
-
-# --- 目前模型（全體共用；GPU 一次只放得下一個）-----------------------------
-def _load_state() -> dict:
-    try:
-        with open(STATE_FILE, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
-
-
-def _save_state():
-    try:
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump({"model": current_model}, f, ensure_ascii=False)
-    except OSError as e:
-        print(f"[警告] 無法寫入 {STATE_FILE}：{e}")
-
-
-current_model: str = _load_state().get("model") or DEFAULT_MODEL
-switch_lock = asyncio.Lock()
 
 # --- 對話記憶（以頻道為單位）------------------------------------------------
 histories: dict[int, list[dict]] = {}
@@ -231,12 +206,13 @@ async def run_blocking(func, *args, **kwargs):
 
 def friendly_error(e: Exception) -> str:
     if isinstance(e, requests.exceptions.ConnectionError):
-        return ("⚠️ 連不上模型服務（llama-swap）。請確認 WSL 裡的服務有在跑：\n"
-                "`wsl -- systemctl status llama-swap`")
+        return ("⚠️ 連不上筆電上的 vLLM。請在筆電雙擊 `host\\vllmctl.cmd` 輸入 `status` 檢查，"
+                "或輸入 `start` 啟動。")
     if isinstance(e, requests.exceptions.Timeout):
-        return "⚠️ 模型回應逾時（可能正在第一次載入 / 下載模型），請稍後再試。"
-    if "401" in str(e) or "Unauthorized" in str(e):
-        return "⚠️ 模型服務拒絕連線（API 金鑰錯誤）。請確認 `.env` 的 `LLM_API_KEY` 和 WSL 端一致，必要時重跑 deploy.ps1。"
+        return "⚠️ 模型回應逾時（可能正在換模型，或很多人同時使用），請稍後再試。"
+    if isinstance(e, llm_client.AuthError):
+        return ("⚠️ vLLM 拒絕連線（API 金鑰錯誤），bot 從 WSL 重讀金鑰後仍失敗。"
+                "若 `.env` 有填 `LLM_API_KEY`，請清空讓 bot 自動讀取，再重啟 bot。")
     if llm_client.is_context_error(e):
         return "⚠️ 內容太長，超過模型的上下文長度。請用 `!reset` 清記憶，或縮短參考資料。"
     return f"⚠️ 發生錯誤：`{str(e)[:300]}`"
@@ -250,8 +226,7 @@ HELP_TEXT = """**📖 使用說明**
 • `!word 報告 <主題>`：課堂報告 .docx
 • `!word <需求>`：一般文件 .docx
 • `!excel <需求>`：Excel 表格 .xlsx（可含公式）
-• `!model` / `!model <名稱>`：查看 / 切換模型（全體共用）
-• `!status`：GPU 上目前載入的模型
+• `!model`：查看目前的模型（和 opencode 共用同一個）
 • `!reset`：清空這個頻道的記憶
 
 💡 產檔指令可以**附上 .txt/.md/.docx/.pdf** 或**回覆某則訊息**，當作參考資料。
@@ -266,54 +241,24 @@ client = discord.Client(intents=intents)
 
 @client.event
 async def on_ready():
-    print(f"[已上線] {client.user}  模型={current_model}  API={llm_client.BASE_URL}")
-
-
-async def cmd_model(channel, arg: str):
-    global current_model
     try:
-        models = await run_blocking(llm_client.list_models)
+        m = await run_blocking(llm_client.current_model)
+        info = f"模型={m['id']}（上下文 {m['max_model_len']}）"
+    except Exception as e:  # noqa: BLE001
+        info = f"暫時連不上 vLLM：{e}"
+    print(f"[已上線] {client.user}  {info}  API={llm_client.BASE_URL}")
+
+
+async def cmd_model(channel):
+    try:
+        m = await run_blocking(llm_client.current_model, True)
     except Exception as e:  # noqa: BLE001
         await channel.send(friendly_error(e))
         return
-    ids = [m["id"] for m in models]
-
-    if not arg:
-        lines = [f"🤖 目前模型：`{current_model}`", "", "**可用模型**（`!model <名稱>` 切換）："]
-        for m in models:
-            mark = "👉 " if m["id"] == current_model else "• "
-            desc = f" — {m['description']}" if m["description"] else ""
-            lines.append(f"{mark}`{m['id']}`{desc}")
-        await channel.send("\n".join(lines))
-        return
-
-    if arg not in ids:
-        await channel.send(f"❓ 沒有 `{arg}` 這個模型。可用：{', '.join(f'`{i}`' for i in ids)}")
-        return
-    if arg == current_model:
-        await channel.send(f"✅ 已經是 `{arg}` 了。")
-        return
-
-    async with switch_lock:
-        current_model = arg
-        _save_state()
-        if arg in await run_blocking(llm_client.running_models):
-            await channel.send(f"✅ 已切換為 `{arg}`。")
-            return
-        await channel.send(f"⏳ 切換到 `{arg}`，載入中（第一次需下載模型，可能要幾分鐘）…")
-        t0 = time.time()
-        try:
-            await run_blocking(llm_client.chat, arg,
-                               [{"role": "user", "content": "hi"}], max_tokens=1)
-            await channel.send(f"✅ `{arg}` 已就緒（{time.time() - t0:.0f} 秒）。")
-        except Exception as e:  # noqa: BLE001
-            await channel.send(friendly_error(e) + "\n模型已記為目前模型，下一次提問時會再嘗試載入。")
-
-
-async def cmd_status(channel):
-    running = await run_blocking(llm_client.running_models)
-    loaded = "、".join(f"`{m}`" for m in running) if running else "（無，閒置已卸載；下次提問會自動載入）"
-    await channel.send(f"🤖 目前選用：`{current_model}`\n🖥️ GPU 已載入：{loaded}")
+    await channel.send(
+        f"🤖 目前模型：`{m['id']}`（上下文 {m['max_model_len']} tokens）\n"
+        "和實驗室的 opencode 共用同一個 vLLM。要換模型請在筆電用 `host\\vllmctl.cmd`，"
+        "bot 會自動跟著換，不用改設定。")
 
 
 async def cmd_generate(message: discord.Message, kind: str, arg: str):
@@ -347,7 +292,7 @@ async def cmd_generate(message: discord.Message, kind: str, arg: str):
     t0 = time.time()
     async with channel.typing():
         try:
-            data = await run_blocking(llm_client.chat_json, current_model, msgs, schema, kind)
+            data = await run_blocking(llm_client.chat_json, msgs, schema, kind)
             data = tw_obj(data)
             path = await run_blocking(builder, data)
         except Exception as e:  # noqa: BLE001
@@ -381,7 +326,7 @@ async def cmd_chat(message: discord.Message, content: str, do_web: bool):
                 )
             msgs = [{"role": "system", "content": SYSTEM_PROMPT}] + _trim(
                 hist + [{"role": "user", "content": user_content}])
-            answer = tw(await run_blocking(llm_client.chat, current_model, msgs))
+            answer = tw(await run_blocking(llm_client.chat, msgs))
         except Exception as e:  # noqa: BLE001
             await channel.send(friendly_error(e))
             return
@@ -418,11 +363,8 @@ async def on_message(message: discord.Message):
         histories.pop(message.channel.id, None)
         await message.channel.send("🧹 已清空這個頻道的對話記憶。")
         return
-    if cmd == "!model":
-        await cmd_model(message.channel, arg)
-        return
-    if cmd == "!status":
-        await cmd_status(message.channel)
+    if cmd in ("!model", "!status"):
+        await cmd_model(message.channel)
         return
     if cmd in ("!ppt", "!word", "!excel"):
         await cmd_generate(message, cmd[1:], arg)
