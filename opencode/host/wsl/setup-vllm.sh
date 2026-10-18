@@ -105,11 +105,13 @@ DRIVER_CUDA="$(nvidia-smi | grep -oP 'CUDA Version:\s*\K[0-9]+' | head -n1)"
 if [ "${DRIVER_CUDA:-13}" -ge 13 ]; then
     uv pip install --python "$APP_DIR/.venv/bin/python" -U vllm --torch-backend=auto
 else
-    VLLM_VERSION="$(curl -fsSL https://api.github.com/repos/vllm-project/vllm/releases/latest | jq -r .tag_name | sed 's/^v//')"
-    [ -n "$VLLM_VERSION" ] && [ "$VLLM_VERSION" != null ] || die "查不到 vLLM 最新版本號（GitHub API 連不上？）"
-    warn "驅動只支援到 CUDA $DRIVER_CUDA，改裝 vLLM $VLLM_VERSION 的 CUDA 12.9 版"
-    uv pip install --python "$APP_DIR/.venv/bin/python" -U --torch-backend=cu129 \
-        "https://github.com/vllm-project/vllm/releases/download/v${VLLM_VERSION}/vllm-${VLLM_VERSION}+cu129-cp38-abi3-manylinux_2_28_$(uname -m).whl"
+    # 不是每一版都有 +cu129 檔案，從最近的正式版往回找第一個有的
+    WHEEL_URL="$(curl -fsSL 'https://api.github.com/repos/vllm-project/vllm/releases?per_page=30' \
+        | jq -r --arg arch "$(uname -m)" '[.[] | select(.prerelease | not) | .assets[]
+            | select(.name | test("\\+cu129-cp38-abi3-manylinux_[0-9_]+_" + $arch + "\\.whl$")) | .browser_download_url][0] // empty')"
+    [ -n "$WHEEL_URL" ] || die "找不到 vLLM 的 CUDA 12.9 版（GitHub API 連不上？）"
+    warn "驅動只支援到 CUDA $DRIVER_CUDA，改裝 vLLM 的 CUDA 12.9 版：$(basename "$WHEEL_URL")"
+    uv pip install --python "$APP_DIR/.venv/bin/python" -U --torch-backend=cu129 "$WHEEL_URL"
 fi
 "$APP_DIR/.venv/bin/vllm" --version
 ok "vLLM 安裝完成"
