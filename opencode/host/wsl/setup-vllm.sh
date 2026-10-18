@@ -100,7 +100,17 @@ fi
 export PATH="$HOME/.local/bin:$PATH"
 mkdir -p "$APP_DIR"
 [ -d "$APP_DIR/.venv" ] || uv venv --python 3.12 "$APP_DIR/.venv"
-uv pip install --python "$APP_DIR/.venv/bin/python" -U vllm --torch-backend=auto
+# PyPI 上的 vLLM 是 CUDA 13 版，需要 580 以上的驅動；驅動只到 CUDA 12.x（例如 vGPU）時改裝 GitHub 上的 +cu129 版
+DRIVER_CUDA="$(nvidia-smi | grep -oP 'CUDA Version:\s*\K[0-9]+' | head -n1)"
+if [ "${DRIVER_CUDA:-13}" -ge 13 ]; then
+    uv pip install --python "$APP_DIR/.venv/bin/python" -U vllm --torch-backend=auto
+else
+    VLLM_VERSION="$(curl -fsSL https://api.github.com/repos/vllm-project/vllm/releases/latest | jq -r .tag_name | sed 's/^v//')"
+    [ -n "$VLLM_VERSION" ] && [ "$VLLM_VERSION" != null ] || die "查不到 vLLM 最新版本號（GitHub API 連不上？）"
+    warn "驅動只支援到 CUDA $DRIVER_CUDA，改裝 vLLM $VLLM_VERSION 的 CUDA 12.9 版"
+    uv pip install --python "$APP_DIR/.venv/bin/python" -U --torch-backend=cu129 \
+        "https://github.com/vllm-project/vllm/releases/download/v${VLLM_VERSION}/vllm-${VLLM_VERSION}+cu129-cp38-abi3-manylinux_2_28_$(uname -m).whl"
+fi
 "$APP_DIR/.venv/bin/vllm" --version
 ok "vLLM 安裝完成"
 
