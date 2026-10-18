@@ -31,6 +31,7 @@
 | **同學：裝 opencode** | 雙擊 `opencode\client\install-client.cmd` → 貼上網址與金鑰 → `opencode` |
 | **同學在家** | 先連學校 VPN，其他同上 |
 | **日常管理** | 雙擊 `opencode\host\vllmctl.cmd`：`info` / `logs` / `preset` / `new-key` / `bench` |
+| **解除安裝** | 主機：`opencode\host\uninstall-host.cmd`（還原原本設定）；同學：`opencode\client\uninstall-client.cmd` |
 
 ## 資料夾
 

@@ -260,7 +260,7 @@ items = [("01", "認識系統", "三個元件、整體架構、模型實測"),
          ("03", "同學使用 opencode", "安裝 client、基本操作、提問技巧"),
          ("04", "Discord bot", "產生 PPT / Word / Excel 草稿"),
          ("05", "不在實驗室時", "在家用學校 VPN、校外用 Funnel"),
-         ("06", "管理與排錯", "金鑰、換模型、安全性、疑難排解")]
+         ("06", "管理與排錯", "金鑰、換模型、排錯、解除安裝")]
 cw, ch, gap = (CW - Inches(0.5)) / 3, Inches(2.1), Inches(0.25)
 for i, (n, t, d) in enumerate(items):
     x = MX + (cw + gap) * (i % 3)
@@ -774,7 +774,40 @@ table(s, MX, TOP, CW, [
 ], [3.8, 6.2], size=14, rowh=0.52)
 
 # =============================================================================
-#  23. 指令小抄
+#  23. 解除安裝
+# =============================================================================
+s = content_slide("06 管理與排錯 · 解除安裝", "解除安裝並還原原本的設定",
+                  "setup-host 第一次安裝時，會先把電源、WSL 網路模式、OpenSSH 的原本狀態備份起來。"
+                  "uninstall-host 就照這份備份還原，並移除 vLLM、排程、防火牆規則和這台的 opencode。"
+                  "用舊版安裝、沒有備份的話，電源會改回 Windows 預設值，結束時會列出來。repo 的檔案和你自己下載的模型都不會動。")
+code(s, MX, TOP, Inches(5.6), Inches(4.4), [
+    "# 筆電（主機），會要求系統管理員權限",
+    ">opencode\\host\\uninstall-host.cmd",
+    "# 看過清單後輸入 y",
+    "",
+    "# 常用參數",
+    ">-KeepModels      # 保留模型",
+    ">-KeepOpencode    # 保留這台的 opencode",
+    ">-RemoveWsl       # 整個刪除 Ubuntu",
+    "",
+    "# 同學的電腦",
+    ">opencode\\client\\uninstall-client.cmd",
+], size=13)
+table(s, MX + Inches(5.9), TOP, CW - Inches(5.9), [
+    ["項目", "移除 / 還原"],
+    ["排程", "vLLM 常駐、Discord bot"],
+    ["WSL 裡的 vLLM", "服務、設定、金鑰、下載的模型"],
+    ["防火牆", "vLLM-opencode-8000"],
+    [".wslconfig", "網路模式還原成安裝前"],
+    ["電源", "睡眠 / 休眠 / 闔上螢幕還原"],
+    ["Funnel · OpenSSH", "關閉 / 還原成安裝前"],
+    ["opencode", "程式與實驗室設定（其他設定保留）"],
+], [2.2, 3.6], size=13, rowh=0.5)
+text(s, MX + Inches(5.9), TOP + Inches(4.15), CW - Inches(5.9), Inches(0.4),
+     "備份位置：%LOCALAPPDATA%\\vllm-opencode-backup", size=12, color=MUTED)
+
+# =============================================================================
+#  24. 指令小抄
 # =============================================================================
 s = new_slide(dark=True)
 header(s, "總結", "指令小抄", dark=True)

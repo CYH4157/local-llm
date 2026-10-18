@@ -141,6 +141,42 @@ if ($uid -eq "0") { Fail "$Distro 的預設使用者是 root：請先從開始�
 [IO.File]::WriteAllText((Join-Path $ScriptDir "wsl-distro.txt"), $Distro, [Text.Encoding]::ASCII)
 Ok "$Distro（WSL2）已就緒"
 
+# --- 備份原本的設定（只在第一次安裝時記錄；uninstall-host 用來還原）-----------
+$BackupDir  = Join-Path $env:LOCALAPPDATA "vllm-opencode-backup"
+$BackupFile = Join-Path $BackupDir "original-settings.json"
+function Get-AcValue([string]$sub, [string]$setting) {
+    # /qh 連隱藏設定（例如闔上螢幕）也會列出；含「AC」的那一行就是插電時的值
+    $line = powercfg /qh SCHEME_CURRENT $sub $setting 2>$null | Select-String ' AC .*0x' | Select-Object -First 1
+    if ($line) { return [Convert]::ToInt32(($line -replace '^.*0x', ''), 16) } else { return $null }
+}
+if (-not (Test-Path $BackupFile)) {
+    New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null
+    $netLine = $null
+    if (Test-Path $WslConfig) {
+        $netLine = Get-Content $WslConfig -Encoding UTF8 | Where-Object { $_ -match '^\s*networkingMode\s*=' } | Select-Object -First 1
+    }
+    $sshCap = Get-WindowsCapability -Online -Name "OpenSSH.Server*" -ErrorAction SilentlyContinue | Select-Object -First 1
+    $sshSvc = Get-Service sshd -ErrorAction SilentlyContinue
+    $backup = [ordered]@{
+        created            = (Get-Date).ToString("s")
+        wslconfig_existed  = [bool](Test-Path $WslConfig)
+        wslconfig_net_line = $netLine
+        power = [ordered]@{
+            standby_ac   = Get-AcValue "SUB_SLEEP" "STANDBYIDLE"
+            hibernate_ac = Get-AcValue "SUB_SLEEP" "HIBERNATEIDLE"
+            lid_ac       = Get-AcValue "SUB_BUTTONS" "LIDACTION"
+        }
+        ssh = [ordered]@{
+            capability_installed = [bool]($sshCap -and $sshCap.State -eq "Installed")
+            start_type           = if ($sshSvc) { "$($sshSvc.StartType)" } else { $null }
+            running              = [bool]($sshSvc -and $sshSvc.Status -eq "Running")
+            firewall_rule_existed = [bool](Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue)
+        }
+    }
+    [IO.File]::WriteAllText($BackupFile, ($backup | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding $false))
+    Ok "已備份原本的設定（解除安裝時還原）：$BackupFile"
+}
+
 # --- 2. mirrored 網路 ---------------------------------------------------------
 Step "2. WSL 網路設定（$WslConfig）"
 if ($Mirrored) {

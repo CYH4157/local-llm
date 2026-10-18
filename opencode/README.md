@@ -24,6 +24,9 @@
 **同學在家**：先連學校 VPN，其他跟在實驗室一樣。第一次要把 VPN 網段加進防火牆：
 `host\setup-host.cmd -SkipVllm -AllowFrom LocalSubnet,<VPN網段>`，見 [使用教學 10.2](docs/使用教學.md#102-在家透過學校-vpn-連線)
 
+**解除安裝**：筆電雙擊 **`host\uninstall-host.cmd`**（還原 setup-host 改過的設定）；同學雙擊 **`client\uninstall-client.cmd`**。
+見 [使用教學 13](docs/使用教學.md#13-解除安裝)
+
 **校外合作者（選用）**：雙擊 **`host\funnel.cmd`**，輸入 `on` / `off` / `status` / `test`。用 Tailscale Funnel 公開成 HTTPS 網址，對方不用裝 Tailscale。
 見 [使用教學 10.1](docs/使用教學.md#101-校外連線tailscale-funnel)
 
