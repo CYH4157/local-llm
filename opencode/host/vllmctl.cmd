@@ -1,9 +1,9 @@
 @echo off
-rem Manage the vLLM service running inside WSL: vllmctl.cmd info | status | logs | restart | preset small | new-key | edit
+rem Manage the vLLM service running inside WSL: vllmctl.cmd info | status | logs | restart | models | switch | preset small | new-key | edit
 chcp 65001 >nul
 set ARGS=%*
 if "%ARGS%"=="" (
-    echo commands: info  status  logs  start  stop  restart  preset small^|medium^|large  new-key  edit
+    echo commands: info  status  logs  start  stop  restart  models  switch  preset small^|medium^|large  new-key  edit
     set /p ARGS=vllmctl ^>
 )
 set DISTRO=Ubuntu

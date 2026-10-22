@@ -12,6 +12,11 @@
      -Name         provider 名稱（預設 laptop，opencode 裡顯示用）
      -Default      設成 opencode 的預設模型（第一次安裝會自動設定）
      -SkipInstall  不安裝 opencode，只寫設定（已經裝好或使用桌面版時）
+     -Models       只加入這些模型，逗號分隔（伺服器模型很多時用，例如國網 API）
+     -Context      伺服器沒回報上下文長度時使用的值（預設 16384）
+     -Label        opencode 裡顯示的 provider 名稱（預設「vLLM (Name)」）
+
+ 也可以連其他 OpenAI 相容的 API，例如國網：雙擊 install-nchc.cmd
 
  可重複執行：會合併進 %USERPROFILE%\.config\opencode\opencode.json，不會刪掉其他設定。
 =============================================================================
@@ -21,7 +26,10 @@ param(
     [string]$Key,
     [string]$Name = "laptop",
     [switch]$Default,
-    [switch]$SkipInstall
+    [switch]$SkipInstall,
+    [string]$Models,
+    [int]$Context = 16384,
+    [string]$Label
 )
 $ErrorActionPreference = "Stop"
 function Step($m) { Write-Host "`n==== $m ====" -ForegroundColor Cyan }
@@ -48,14 +56,22 @@ if ($Name -notmatch '^[A-Za-z0-9_-]+$') { throw "-Name 只能用英數字、- �
 # --- 1. 測試連線 --------------------------------------------------------------
 Step "1. 測試連線 $Url"
 try {
-    $models = Invoke-RestMethod -Uri "$Url/models" -Headers @{ Authorization = "Bearer $Key" } -TimeoutSec 10
+    $served = Invoke-RestMethod -Uri "$Url/models" -Headers @{ Authorization = "Bearer $Key" } -TimeoutSec 10
 } catch {
     Write-Host "  連不到 $Url/models ：$($_.Exception.Message)" -ForegroundColor Red
     Write-Host "  請確認：筆電有開機且沒休眠、IP 正確、和筆電在同一個網路、金鑰正確。" -ForegroundColor Red
     exit 1
 }
-if (-not $models.data) { Write-Host "  伺服器沒有回傳任何模型" -ForegroundColor Red; exit 1 }
-foreach ($m in $models.data) { Write-Host "  - $($m.id)  (context $($m.max_model_len))" }
+if (-not $served.data) { Write-Host "  伺服器沒有回傳任何模型" -ForegroundColor Red; exit 1 }
+if ($Models) {
+    $want = @($Models -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $missing = @($want | Where-Object { $_ -notin $served.data.id })
+    if ($missing) { Warn "伺服器上沒有這些模型，略過：$($missing -join ', ')" }
+    # 依 -Models 的順序排，第一個就是預設模型
+    $served.data = @(foreach ($w in $want) { $served.data | Where-Object { $_.id -eq $w } })
+    if (-not $served.data) { Write-Host "  -Models 指定的模型伺服器上都沒有" -ForegroundColor Red; exit 1 }
+}
+foreach ($m in $served.data) { Write-Host "  - $($m.id)  (context $(if ($m.max_model_len) { $m.max_model_len } else { "未回報，用 $Context" }))" }
 Ok "連線成功"
 
 # --- 2. 安裝 opencode ---------------------------------------------------------
@@ -115,8 +131,8 @@ if (Test-Path $cfgPath) {
 if (-not $cfg) { $cfg = [pscustomobject]@{ '$schema' = 'https://opencode.ai/config.json' } }
 
 $modelMap = [ordered]@{}
-foreach ($m in $models.data) {
-    $ctx = 16384
+foreach ($m in $served.data) {
+    $ctx = $Context
     if ($m.max_model_len) { $ctx = [int]$m.max_model_len }
     $modelMap[$m.id] = [ordered]@{
         name      = "$($m.id) ($Name)"
@@ -127,7 +143,7 @@ foreach ($m in $models.data) {
 }
 $provider = [ordered]@{
     npm     = "@ai-sdk/openai-compatible"
-    name    = "vLLM ($Name)"
+    name    = $(if ($Label) { $Label } else { "vLLM ($Name)" })
     options = [ordered]@{ baseURL = $Url; apiKey = $Key }
     models  = $modelMap
 }
@@ -136,7 +152,7 @@ if (-not $cfg.PSObject.Properties['provider']) {
 }
 $cfg.provider | Add-Member -NotePropertyName $Name -NotePropertyValue $provider -Force
 
-$first = "$Name/$($models.data[0].id)"
+$first = "$Name/$($served.data[0].id)"
 # 預設模型若指向這個 provider、但模型已不存在（筆電用 vllmctl 換過模型），自動改成新模型
 $stale = $false
 foreach ($p in 'model', 'small_model') {

@@ -5,7 +5,10 @@
 
 APP_DIR="${APP_DIR:-$HOME/vllm-server}"     # vLLM 安裝位置（venv、設定、啟動腳本）
 ENV_FILE="$APP_DIR/vllm.env"                # 模型 / 埠號 / 金鑰設定
+PROFILE_DIR="$APP_DIR/models"               # 用過的模型各自的設定（vllmctl switch 切換用）
 SERVICE=vllm                                # systemd 服務名稱
+# 跟著模型走的設定；埠號、金鑰等其他設定切換模型時不變
+PROFILE_KEYS="SERVE_MODEL|SERVE_NAME|SERVE_MAX_LEN|SERVE_GPU_UTIL|SERVE_TOOL_PARSER|SERVE_EXTRA_ARGS"
 
 step() { printf '\n\033[36m==== %s ====\033[0m\n' "$1"; }
 ok()   { printf '  \033[32m[OK]\033[0m %s\n' "$1"; }

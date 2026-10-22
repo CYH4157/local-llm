@@ -11,6 +11,9 @@
 #      --key KEY     vLLM 的 API 金鑰
 #      --name ID     provider 名稱（預設 vllm；連多台時用不同名字，例 laptop / server）
 #      --default     設成 opencode 的預設模型（第一個加入的 provider 也會自動設成預設）
+#      --models A,B  只加入這些模型，逗號分隔（伺服器模型很多時用，例如國網 API）
+#      --context N   伺服器沒回報上下文長度時使用的值（預設 16384）
+#      --label TEXT  opencode 裡顯示的 provider 名稱（預設「vLLM (name)」）
 #
 #  可重複執行：會「合併」進 ~/.config/opencode/opencode.json，不會刪掉其他 provider。
 #  金鑰另存在 ~/.config/opencode/keys/<name>.key（權限 600），設定檔裡不放明碼。
@@ -23,14 +26,17 @@ ok()   { printf '  \033[32m[OK]\033[0m %s\n' "$1"; }
 warn() { printf '  \033[33m[!]\033[0m  %s\n' "$1"; }
 die()  { printf '  \033[31m[X]\033[0m  %s\n' "$1" >&2; exit 1; }
 
-URL="" KEY="" PNAME="vllm" MAKE_DEFAULT=0
+URL="" KEY="" PNAME="vllm" MAKE_DEFAULT=0 ONLY="" CTX=16384 LABEL=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --url)     URL="${2%/}"; shift 2 ;;
         --key)     KEY="$2"; shift 2 ;;
         --name)    PNAME="$2"; shift 2 ;;
         --default) MAKE_DEFAULT=1; shift ;;
-        -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+        --models)  ONLY="$2"; shift 2 ;;
+        --context) CTX="$2"; shift 2 ;;
+        --label)   LABEL="$2"; shift 2 ;;
+        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
         *) die "不認得的參數：$1" ;;
     esac
 done
@@ -51,7 +57,13 @@ ok "完成"
 step "2. 連線測試 $URL"
 MODELS_JSON="$(curl -fsS -m 10 -H "Authorization: Bearer $KEY" "$URL/models")" \
     || die "連不到 $URL/models（服務沒開？IP 變了？不在同一個網路？防火牆？金鑰錯？）"
-echo "$MODELS_JSON" | jq -r '.data[] | "  - \(.id)  (context \(.max_model_len // "?"))"'
+if [ -n "$ONLY" ]; then
+    # 依 --models 的順序排，第一個就是預設模型
+    MODELS_JSON="$(echo "$MODELS_JSON" | jq --arg only "$ONLY" '($only | split(",") | map(ltrimstr(" ") | rtrimstr(" "))) as $w
+        | .data |= [$w[] as $id | .[] | select(.id == $id)]')"
+    [ "$(echo "$MODELS_JSON" | jq '.data | length')" -gt 0 ] || die "--models 指定的模型伺服器上都沒有"
+fi
+echo "$MODELS_JSON" | jq -r --arg ctx "$CTX" '.data[] | "  - \(.id)  (context \(.max_model_len // "未回報，用 \($ctx)"))"'
 ok "連線成功"
 
 # --- 3. 安裝 opencode -------------------------------------------------------
@@ -77,7 +89,7 @@ mkdir -p "$CFG_DIR/keys"
 ( umask 077; printf '%s' "$KEY" > "$CFG_DIR/keys/$PNAME.key" )
 [ ! -f "$CFG_DIR/opencode.json" ] || cp "$CFG_DIR/opencode.json" "$CFG_DIR/opencode.json.bak"
 
-DEFAULT_MODEL="$(MODELS_JSON="$MODELS_JSON" python3 - "$CFG_DIR/opencode.json" "$PNAME" "$URL" "$MAKE_DEFAULT" <<'PY'
+DEFAULT_MODEL="$(MODELS_JSON="$MODELS_JSON" CTX="$CTX" LABEL="$LABEL" python3 - "$CFG_DIR/opencode.json" "$PNAME" "$URL" "$MAKE_DEFAULT" <<'PY'
 import json, os, sys
 path, pname, url, make_default = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4] == "1"
 try:
@@ -89,7 +101,7 @@ cfg.setdefault("$schema", "https://opencode.ai/config.json")
 
 models = {}
 for m in json.loads(os.environ["MODELS_JSON"])["data"]:
-    ctx = int(m.get("max_model_len") or 16384)
+    ctx = int(m.get("max_model_len") or os.environ["CTX"])
     models[m["id"]] = {
         "name": f'{m["id"]} ({pname})',
         "tool_call": True,
@@ -99,7 +111,7 @@ for m in json.loads(os.environ["MODELS_JSON"])["data"]:
 
 cfg.setdefault("provider", {})[pname] = {
     "npm": "@ai-sdk/openai-compatible",
-    "name": f"vLLM ({pname})",
+    "name": os.environ["LABEL"] or f"vLLM ({pname})",
     "options": {"baseURL": url, "apiKey": "{file:~/.config/opencode/keys/%s.key}" % pname},
     "models": models,
 }
