@@ -3,6 +3,8 @@
  install-client.ps1 — Windows 電腦安裝 opencode，並連到實驗室筆電（WSL）上的 vLLM
 
  最簡單：雙擊 install-client.cmd，依提示貼上筆電的網址與金鑰。
+ 管理者也可以先把網址、金鑰填進同資料夾的 servers.json（照 servers.example.json 複製），
+ 同學雙擊後就會自動加入裡面的每一台，不用自己輸入（servers.json 有金鑰，不會上傳到 git）。
  或在 PowerShell 執行（網址與金鑰在筆電上執行 bash vllmctl.sh info 可看到）：
      powershell -ExecutionPolicy Bypass -File install-client.ps1 -Url http://192.168.1.23:8000/v1 -Key sk-vllm-xxx
 
@@ -29,12 +31,49 @@ param(
     [switch]$SkipInstall,
     [string]$Models,
     [int]$Context = 16384,
-    [string]$Label
+    [string]$Label,
+    [switch]$FromList     # 內部用：由 servers.json 逐台呼叫時，不印最後的使用說明
 )
 $ErrorActionPreference = "Stop"
 function Step($m) { Write-Host "`n==== $m ====" -ForegroundColor Cyan }
 function Ok($m)   { Write-Host "  [OK] $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "  [!]  $m" -ForegroundColor Yellow }
+function Show-Usage {
+    Step "完成"
+    Write-Host "  1. 開啟「終端機」（Windows Terminal）或 PowerShell（剛裝好 opencode 的話要開新的視窗）"
+    Write-Host "  2. cd 到你的專案資料夾，例如：cd $env:USERPROFILE\Documents\my-thesis"
+    Write-Host "  3. 輸入：opencode"
+    Write-Host "  在 opencode 裡輸入 /models 可以切換伺服器與模型。"
+}
+
+# --- 0. servers.json：管理者預先填好的伺服器清單 -----------------------------
+$listPath = Join-Path $PSScriptRoot "servers.json"
+if (-not $Url -and -not $FromList -and (Test-Path $listPath)) {
+    try { $list = Get-Content $listPath -Raw -Encoding UTF8 | ConvertFrom-Json }
+    catch { Write-Host "  servers.json 格式不對（常見：少了逗號或引號）：$($_.Exception.Message)" -ForegroundColor Red; exit 1 }
+    $servers = @($list.servers | Where-Object { $_ -and $_.enabled -ne $false })
+    if (-not $servers) { Write-Host "  servers.json 裡沒有任何伺服器" -ForegroundColor Red; exit 1 }
+    Write-Host "讀取 $listPath：共 $($servers.Count) 台伺服器"
+    $done = @(); $failed = @()
+    foreach ($s in $servers) {
+        if (-not $s.url -or -not $s.name) { Warn "有一筆缺少 name 或 url，略過"; continue }
+        $a = @{ Url = "$($s.url)"; Name = "$($s.name)"; FromList = $true }
+        # 金鑰是空的（例如每個人自己的國網金鑰）→ 執行時再問
+        if ($s.key -and "$($s.key)" -notmatch '^請填') { $a.Key = "$($s.key)" }
+        if ($s.label)   { $a.Label = "$($s.label)" }
+        if ($s.context) { $a.Context = [int]$s.context }
+        if ($s.models)  { $a.Models = (@($s.models) -join ',') }
+        if ($s.default) { $a.Default = $true }
+        if ($SkipInstall) { $a.SkipInstall = $true }
+        Write-Host "`n######## $(if ($s.label) { $s.label } else { $s.name }) ########" -ForegroundColor Magenta
+        try { & $PSCommandPath @a; $ok = ($LASTEXITCODE -eq 0) } catch { Write-Host "  $($_.Exception.Message)" -ForegroundColor Red; $ok = $false }
+        if ($ok) { $done += "$($s.name)" } else { $failed += "$($s.name)" }
+    }
+    if ($done)   { Ok "已加入：$($done -join ', ')" }
+    if ($failed) { Warn "沒加入：$($failed -join ', ')（看上面的錯誤訊息；修好後再雙擊一次即可）" }
+    if ($done) { Show-Usage }
+    exit $(if ($failed) { 1 } else { 0 })
+}
 
 if (-not $Url) { $Url = Read-Host "筆電的 vLLM 網址（例：http://192.168.1.23:8000/v1）" }
 # 在筆電本機安裝（網址是 127.0.0.1 / localhost）且沒給金鑰：直接從 WSL 的 vllm.env 讀，指令裡不必出現金鑰
@@ -46,7 +85,7 @@ if (-not $Key -and $Url -match '://(127\.0\.0\.1|localhost)[:/]') {
     $Key = "$(wsl.exe -d $distro -e bash -c '. ~/vllm-server/vllm.env 2>/dev/null; printf %s $SERVE_API_KEY')".Trim()
     if ($Key) { Write-Host "  已從 WSL（$distro）讀取 API 金鑰" }
 }
-if (-not $Key) { $Key = Read-Host "API 金鑰（sk-vllm-...）" }
+if (-not $Key) { $Key = Read-Host "$(if ($Label) { "$Label 的 " })API 金鑰（sk-...）" }
 $Url = $Url.Trim().TrimEnd('/')
 $Key = $Key.Trim()
 if ($Url -notmatch '^https?://') { $Url = "http://$Url" }
@@ -59,7 +98,7 @@ try {
     $served = Invoke-RestMethod -Uri "$Url/models" -Headers @{ Authorization = "Bearer $Key" } -TimeoutSec 10
 } catch {
     Write-Host "  連不到 $Url/models ：$($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "  請確認：筆電有開機且沒休眠、IP 正確、和筆電在同一個網路、金鑰正確。" -ForegroundColor Red
+    Write-Host "  請確認：伺服器有開機、IP 正確、金鑰正確；伺服器要走 VPN 的話，先連上 VPN。" -ForegroundColor Red
     exit 1
 }
 if (-not $served.data) { Write-Host "  伺服器沒有回傳任何模型" -ForegroundColor Red; exit 1 }
@@ -183,8 +222,5 @@ if (-not (Test-Path $rulesSrc)) {
     Ok "已安裝：回答用繁體中文、相對路徑、查資料附來源與日期、不捏造文獻"
 }
 
-Step "完成"
-Write-Host "  1. 開啟「終端機」（Windows Terminal）或 PowerShell"
-Write-Host "  2. cd 到你的專案資料夾，例如：cd $env:USERPROFILE\Documents\my-thesis"
-Write-Host "  3. 輸入：opencode"
-Write-Host "  在 opencode 裡輸入 /models 可以確認正在使用筆電的模型。"
+if (-not $FromList) { Show-Usage }
+exit 0   # 明確回傳成功：由 servers.json 逐台呼叫時靠 $LASTEXITCODE 判斷

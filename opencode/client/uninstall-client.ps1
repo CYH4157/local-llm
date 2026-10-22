@@ -7,12 +7,13 @@
      不會動：你自己加的其他 provider / 設定、Scoop 本身（可能裝了其他軟體）
 
  參數：
-     -Name laptop     要移除的 provider 名稱（安裝時的 -Name，預設 laptop）
+     -Name laptop     要移除的 provider 名稱，逗號分隔（安裝時的 -Name）；
+                      不填 = servers.json 裡的每一台（沒有 servers.json 時是 laptop）
      -KeepProgram     只移除設定，保留 opencode 程式（例如還要用它連別的模型）
 =============================================================================
 #>
 param(
-    [string]$Name = "laptop",
+    [string]$Name,
     [switch]$KeepProgram
 )
 $ErrorActionPreference = "Stop"
@@ -23,8 +24,17 @@ function Warn($m) { Write-Host "  [!]  $m" -ForegroundColor Yellow }
 $cfgDir  = Join-Path $env:USERPROFILE ".config\opencode"
 $cfgPath = Join-Path $cfgDir "opencode.json"
 
+$names = @("laptop")
+$listPath = Join-Path $PSScriptRoot "servers.json"
+if ($Name) {
+    $names = @($Name -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+} elseif (Test-Path $listPath) {
+    try { $names = @((Get-Content $listPath -Raw -Encoding UTF8 | ConvertFrom-Json).servers | Where-Object { $_.name } | ForEach-Object { "$($_.name)" }) }
+    catch { Warn "servers.json 無法解析，只移除 laptop" }
+}
+
 # --- 1. opencode 設定 ---------------------------------------------------------
-Step "1. 移除 opencode 設定裡的 provider「$Name」"
+Step "1. 移除 opencode 設定裡的 provider「$($names -join ', ')」"
 if (-not (Test-Path $cfgPath)) {
     Ok "沒有設定檔，略過"
 } else {
@@ -32,15 +42,17 @@ if (-not (Test-Path $cfgPath)) {
     $cfg = $null
     try { $cfg = Get-Content $cfgPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { Warn "設定檔無法解析，保留不動：$cfgPath" }
     if ($cfg) {
-        if ($cfg.PSObject.Properties['provider'] -and $cfg.provider.PSObject.Properties[$Name]) {
-            $cfg.provider.PSObject.Properties.Remove($Name)
-            Ok "已移除 provider $Name"
-        } else {
-            Ok "設定裡沒有 provider $Name"
-        }
-        # 預設模型指向被移除的 provider → 一併移除，opencode 會改用其他可用的模型
-        foreach ($p in 'model', 'small_model') {
-            if ($cfg.PSObject.Properties[$p] -and "$($cfg.$p)" -like "$Name/*") { $cfg.PSObject.Properties.Remove($p) }
+        foreach ($n in $names) {
+            if ($cfg.PSObject.Properties['provider'] -and $cfg.provider.PSObject.Properties[$n]) {
+                $cfg.provider.PSObject.Properties.Remove($n)
+                Ok "已移除 provider $n"
+            } else {
+                Ok "設定裡沒有 provider $n"
+            }
+            # 預設模型指向被移除的 provider → 一併移除，opencode 會改用其他可用的模型
+            foreach ($p in 'model', 'small_model') {
+                if ($cfg.PSObject.Properties[$p] -and "$($cfg.$p)" -like "$n/*") { $cfg.PSObject.Properties.Remove($p) }
+            }
         }
         $left = @($cfg.PSObject.Properties | Where-Object { $_.Name -ne '$schema' -and
                   -not ($_.Name -eq 'provider' -and @($_.Value.PSObject.Properties).Count -eq 0) })

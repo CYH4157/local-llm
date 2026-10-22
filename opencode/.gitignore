@@ -8,3 +8,6 @@ _archive/
 # Python
 __pycache__/
 *.pyc
+
+# client 的伺服器清單（含金鑰，不上傳；範本是 servers.example.json）
+client/servers.json
