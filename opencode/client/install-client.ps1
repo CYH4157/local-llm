@@ -3,7 +3,7 @@
  install-client.ps1 — Windows 電腦安裝 opencode，並連到實驗室筆電（WSL）上的 vLLM
 
  最簡單：雙擊 install-client.cmd，依提示貼上筆電的網址與金鑰。
- 管理者也可以先把網址、金鑰填進同資料夾的 servers.json（照 servers.example.json 複製），
+ 管理者也可以先把網址、金鑰填進 opencode\servers.json（照 servers.example.json 複製），
  同學雙擊後就會自動加入裡面的每一台，不用自己輸入（servers.json 有金鑰，不會上傳到 git）。
  或在 PowerShell 執行（網址與金鑰在筆電上執行 bash vllmctl.sh info 可看到）：
      powershell -ExecutionPolicy Bypass -File install-client.ps1 -Url http://192.168.1.23:8000/v1 -Key sk-vllm-xxx
@@ -47,7 +47,7 @@ function Show-Usage {
 }
 
 # --- 0. servers.json：管理者預先填好的伺服器清單 -----------------------------
-$listPath = Join-Path $PSScriptRoot "servers.json"
+$listPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\servers.json"))   # opencode\servers.json
 if (-not $Url -and -not $FromList -and (Test-Path $listPath)) {
     try { $list = Get-Content $listPath -Raw -Encoding UTF8 | ConvertFrom-Json }
     catch { Write-Host "  servers.json 格式不對（常見：少了逗號或引號）：$($_.Exception.Message)" -ForegroundColor Red; exit 1 }
@@ -79,7 +79,7 @@ if (-not $Url) { $Url = Read-Host "筆電的 vLLM 網址（例：http://192.168.
 # 在筆電本機安裝（網址是 127.0.0.1 / localhost）且沒給金鑰：直接從 WSL 的 vllm.env 讀，指令裡不必出現金鑰
 if (-not $Key -and $Url -match '://(127\.0\.0\.1|localhost)[:/]') {
     $distro = "Ubuntu"
-    foreach ($df in (Join-Path $PSScriptRoot "wsl-distro.txt"), (Join-Path $PSScriptRoot "..\host\wsl-distro.txt")) {
+    foreach ($df in (Join-Path $PSScriptRoot "wsl-distro.txt"), (Join-Path $PSScriptRoot "..\..\server\wsl2\wsl-distro.txt")) {
         if (Test-Path $df) { $distro = (Get-Content $df -Raw).Trim(); break }
     }
     $Key = "$(wsl.exe -d $distro -e bash -c '. ~/vllm-server/vllm.env 2>/dev/null; printf %s $SERVE_API_KEY')".Trim()
@@ -139,7 +139,7 @@ if ($SkipInstall) {
         $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
                    ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
         if ($isAdmin) {
-            # 從 host\setup-host.ps1（系統管理員）呼叫時，Scoop 需要 -RunAsAdmin 才肯安裝
+            # 從 server\wsl2\setup-host.ps1（系統管理員）呼叫時，Scoop 需要 -RunAsAdmin 才肯安裝
             Invoke-Expression "& {$(Invoke-RestMethod -Uri 'https://get.scoop.sh')} -RunAsAdmin"
         } else {
             Invoke-RestMethod -Uri "https://get.scoop.sh" | Invoke-Expression

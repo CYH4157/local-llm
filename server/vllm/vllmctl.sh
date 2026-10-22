@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  vllmctl.sh — 管理 WSL 裡的 vLLM 服務（Windows 上雙擊 host\vllmctl.cmd 就是執行這支）
+#  vllmctl.sh — 管理 WSL 裡的 vLLM 服務（Windows 上雙擊 server\wsl2\vllmctl.cmd 就是執行這支）
 #
 #    info                     顯示給同學的連線資訊（網址、金鑰、安裝方式）
 #    show                     顯示目前設定（金鑰遮蔽）、GPU 用量、KV cache 容量
@@ -101,7 +101,7 @@ list_profiles() {
 }
 
 client_reminder() {
-    warn "模型名稱或上下文變了：每台 client 請重跑一次 install-client（Windows 雙擊 client\\install-client.cmd）"
+    warn "模型名稱或上下文變了：每台 client 請重跑一次 install-client（Windows 雙擊 opencode\\client\\install-client.cmd）"
 }
 
 cmd="${1:-info}"; shift || true
@@ -115,8 +115,8 @@ case "$cmd" in
         echo "vLLM 網址：http://$HOSTIP:$SERVE_PORT/v1"
         echo "API 金鑰 ：$SERVE_API_KEY"
         echo
-        echo "同學的 Windows 電腦：複製 opencode 資料夾 → 雙擊 client\\install-client.cmd → 貼上上面的網址與金鑰"
-        echo "同學的 Ubuntu 電腦 ：bash client/install-client.sh --url http://$HOSTIP:$SERVE_PORT/v1 --key $SERVE_API_KEY --name laptop"
+        echo "同學的 Windows 電腦：複製 opencode 資料夾 → 雙擊 opencode\\client\\install-client.cmd → 貼上上面的網址與金鑰"
+        echo "同學的 Ubuntu 電腦 ：bash opencode/client/install-client.sh --url http://$HOSTIP:$SERVE_PORT/v1 --key $SERVE_API_KEY --name laptop"
         echo "先測試連線        ：瀏覽器開 http://$HOSTIP:$SERVE_PORT/v1/models（看到 Unauthorized 代表連得到）"
         ;;
     show)

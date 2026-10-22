@@ -206,7 +206,7 @@ async def run_blocking(func, *args, **kwargs):
 
 def friendly_error(e: Exception) -> str:
     if isinstance(e, requests.exceptions.ConnectionError):
-        return ("⚠️ 連不上筆電上的 vLLM。請在筆電雙擊 `opencode\\host\\vllmctl.cmd` 輸入 `status` 檢查，"
+        return ("⚠️ 連不上筆電上的 vLLM。請在筆電雙擊 `server\\wsl2\\vllmctl.cmd` 輸入 `status` 檢查，"
                 "或輸入 `start` 啟動。")
     if isinstance(e, requests.exceptions.Timeout):
         return "⚠️ 模型回應逾時（可能正在換模型，或很多人同時使用），請稍後再試。"
@@ -257,7 +257,7 @@ async def cmd_model(channel):
         return
     await channel.send(
         f"🤖 目前模型：`{m['id']}`（上下文 {m['max_model_len']} tokens）\n"
-        "和實驗室的 opencode 共用同一個 vLLM。要換模型請在筆電用 `opencode\\host\\vllmctl.cmd`，"
+        "和實驗室的 opencode 共用同一個 vLLM。要換模型請在筆電用 `server\\wsl2\\vllmctl.cmd`，"
         "bot 會自動跟著換，不用改設定。")
 
 

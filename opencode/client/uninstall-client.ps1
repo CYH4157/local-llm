@@ -25,7 +25,7 @@ $cfgDir  = Join-Path $env:USERPROFILE ".config\opencode"
 $cfgPath = Join-Path $cfgDir "opencode.json"
 
 $names = @("laptop")
-$listPath = Join-Path $PSScriptRoot "servers.json"
+$listPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\servers.json"))   # opencode\servers.json
 if ($Name) {
     $names = @($Name -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 } elseif (Test-Path $listPath) {

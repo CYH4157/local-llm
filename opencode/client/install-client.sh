@@ -3,7 +3,7 @@
 #  install-client.sh — Ubuntu 電腦（例如伺服器主機）安裝 opencode，並連到實驗室筆電的 vLLM
 #  （Windows 電腦請改用同資料夾的 install-client.cmd）
 #
-#  用法（網址與金鑰在筆電雙擊 host\vllmctl.cmd 輸入 info 可看到）：
+#  用法（網址與金鑰在筆電雙擊 server\wsl2\vllmctl.cmd 輸入 info 可看到）：
 #      bash install-client.sh --url http://192.168.1.23:8000/v1 --key sk-vllm-xxx --name laptop
 #
 #  參數：
@@ -42,8 +42,8 @@ while [ $# -gt 0 ]; do
 done
 [[ "$PNAME" =~ ^[a-zA-Z0-9_-]+$ ]] || die "--name 只能用英數字、- 和 _"
 
-[ -n "$URL" ] || die "請用 --url 提供筆電的 vLLM 網址（在筆電雙擊 host\\vllmctl.cmd 輸入 info 可看到）"
-[ -n "$KEY" ] || die "請用 --key 提供 API 金鑰（在筆電雙擊 host\\vllmctl.cmd 輸入 info 可看到）"
+[ -n "$URL" ] || die "請用 --url 提供筆電的 vLLM 網址（在筆電雙擊 server\\wsl2\\vllmctl.cmd 輸入 info 可看到）"
+[ -n "$KEY" ] || die "請用 --key 提供 API 金鑰（在筆電雙擊 server\\wsl2\\vllmctl.cmd 輸入 info 可看到）"
 case "$URL" in */v1) ;; *) URL="$URL/v1" ;; esac
 
 # --- 1. 套件 ----------------------------------------------------------------

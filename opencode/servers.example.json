@@ -1,5 +1,5 @@
 {
-  "_說明": "管理者：複製這個檔案改名成 servers.json，填好網址與金鑰，再把整個 client 資料夾私下給同學。同學雙擊 install-client.cmd 就會自動加入下面每一台。servers.json 有金鑰，已在 .gitignore 裡，不會上傳到 GitHub。",
+  "_說明": "管理者：複製這個檔案改名成 servers.json，填好網址與金鑰，再把整個 opencode 資料夾私下給同學。同學雙擊 client 資料夾裡的 install-client.cmd 就會自動加入下面每一台。servers.json 有金鑰，已在 .gitignore 裡，不會上傳到 GitHub。",
   "_欄位": "name：英數字代號（不要重複）；label：opencode 裡顯示的名稱；url：要含 /v1；key：API 金鑰，留空 = 執行時再問；default：true = 設成預設模型；models：只加入這些模型（不填 = 全部）；context：伺服器沒回報時的上下文長度；enabled：false = 先不加入",
   "servers": [
     {

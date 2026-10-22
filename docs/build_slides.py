@@ -385,7 +385,7 @@ s = content_slide("02 筆電主機安裝 · 全程約 20~40 分鐘，下載約 1
                   "整個安裝只要雙擊一個檔案。第一次如果還沒有 WSL，腳本會先安裝 Ubuntu 並要求重開機，"
                   "重開機後從開始選單開 Ubuntu 設定帳號密碼，再雙擊一次就會繼續。結束時會印出要給同學的網址和金鑰。")
 steps = ["把專案資料夾放到筆電（git clone 或複製）",
-         "雙擊 opencode\\host\\setup-host.cmd，同意系統管理員權限",
+         "雙擊 server\\wsl2\\setup-host.cmd，同意系統管理員權限",
          "第一次沒有 WSL：自動安裝 → 重開機 → 開「Ubuntu」設定帳密 → 再雙擊一次",
          "出現 [sudo] password 時輸入 Ubuntu 密碼（打字不會顯示）",
          "結束時記下印出的「網址」與「API 金鑰」"]
@@ -456,7 +456,7 @@ code(s, MX + Inches(7.2), TOP, CW - Inches(7.2), Inches(2.6), [
 box(s, MX + Inches(7.2), TOP + Inches(2.85), CW - Inches(7.2), Inches(1.75))
 text(s, MX + Inches(7.5), TOP + Inches(3.05), CW - Inches(7.8), Inches(1.5),
      [[("Ubuntu 電腦", {"bold": True, "color": INK, "size": 15})],
-      [("bash client/install-client.sh --url <網址> --key <金鑰> --name laptop", {"mono": True, "size": 12})],
+      [("bash opencode/client/install-client.sh --url <網址> --key <金鑰> --name laptop", {"mono": True, "size": 12})],
       [("桌面版：opencode.ai/download 下載，再用 -SkipInstall 跑一次", {"size": 12})]], space=6)
 
 # =============================================================================
@@ -619,7 +619,7 @@ for i, st in enumerate(steps):
     text(s, MX + Inches(0.7), y + Inches(0.1), Inches(6.0), Inches(0.8), st, size=16, color=INK)
 code(s, MX + Inches(7.0), TOP, CW - Inches(7.0), Inches(2.5), [
     "# 筆電，會要求系統管理員權限",
-    ">host\\setup-host.cmd -SkipVllm",
+    ">server\\wsl2\\setup-host.cmd -SkipVllm",
     ">  -AllowFrom LocalSubnet,10.8.0.0/16",
     "",
     "# 10.8.0.0/16 換成學校 VPN 的網段",
@@ -639,7 +639,7 @@ s = content_slide("05 不在實驗室時 · 校外合作者", "校外合作者�
                   "唯一的保護是 API 金鑰，所以給之前先換金鑰，用完就關。腳本只公開 /v1，因為 vLLM 的金鑰只保護 /v1，"
                   "/metrics 這類路徑不需要金鑰。")
 code(s, MX, TOP, Inches(5.6), Inches(4.4), [
-    "# 筆電：雙擊 host\\funnel.cmd",
+    "# 筆電：雙擊 server\\wsl2\\funnel.cmd",
     ">on",
     "# 第一次：自動裝 Tailscale → 登入",
     "# → 瀏覽器按「同意啟用 Funnel」",
@@ -664,7 +664,7 @@ for i, (ic, t, d) in enumerate([("🔑", "給之前先換金鑰", "vllmctl.cmd n
 # =============================================================================
 #  18. vllmctl
 # =============================================================================
-s = content_slide("06 管理與排錯", "日常管理：雙擊 host\\vllmctl.cmd",
+s = content_slide("06 管理與排錯", "日常管理：雙擊 server\\wsl2\\vllmctl.cmd",
                   "vllmctl 只在筆電上用，雙擊後輸入指令。最常用的是 info 和 logs。"
                   "stop 可以暫時釋放顯卡，例如筆電要跑其他 GPU 程式時。")
 table(s, MX, TOP, CW, [
@@ -782,7 +782,7 @@ s = content_slide("06 管理與排錯 · 解除安裝", "解除安裝並還原�
                   "用舊版安裝、沒有備份的話，電源會改回 Windows 預設值，結束時會列出來。repo 的檔案和你自己下載的模型都不會動。")
 code(s, MX, TOP, Inches(5.6), Inches(4.4), [
     "# 筆電（主機），會要求系統管理員權限",
-    ">opencode\\host\\uninstall-host.cmd",
+    ">server\\wsl2\\uninstall-host.cmd",
     "# 看過清單後輸入 y",
     "",
     "# 常用參數",
@@ -813,7 +813,7 @@ s = new_slide(dark=True)
 header(s, "總結", "指令小抄", dark=True)
 footer(s, dark=True)
 notes(s, "最後這頁可以截圖貼在實驗室群組。完整步驟寫在 repo 根目錄的「完整步驟.md」。")
-cols = [("安裝", [("筆電主機（opencode\\host）", "setup-host.cmd"),
+cols = [("安裝", [("筆電主機（server\\wsl2）", "setup-host.cmd"),
                   ("同學電腦（opencode\\client）", "install-client.cmd"),
                   ("Discord bot", "deploy.ps1 → start-bot.bat")]),
         ("使用", [("在專案資料夾", "opencode"),

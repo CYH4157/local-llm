@@ -3,7 +3,7 @@
  setup-host.ps1 — 把 Windows 筆電變成主機：WSL2 裡跑 vLLM，Windows 上用 opencode，
                           實驗室其他電腦用筆電的 IP 連進來
 
- 最簡單：雙擊 host\setup-host.cmd（會自動要求系統管理員權限）。
+ 最簡單：雙擊 server\wsl2\setup-host.cmd（會自動要求系統管理員權限）。
  或以「系統管理員」開 PowerShell：
      powershell -ExecutionPolicy Bypass -File .\setup-host.ps1
      powershell -ExecutionPolicy Bypass -File .\setup-host.ps1 -Preset laptop -EnableSsh
@@ -227,7 +227,7 @@ Ok "已註冊並啟動（不顯示視窗；每 5 分鐘自動檢查；重開機�
 
 # --- 4. 在 WSL 安裝 vLLM ------------------------------------------------------
 Step "4. 在 $Distro 安裝 vLLM（會詢問 Ubuntu 密碼；第一次約 20~40 分鐘）"
-$src = "$(wsl.exe -d $Distro -e wslpath -a (Join-Path $ScriptDir "wsl"))".Trim()
+$src = "$(wsl.exe -d $Distro -e wslpath -a ([IO.Path]::GetFullPath((Join-Path $ScriptDir "..\vllm"))))".Trim()
 Invoke-Wsl "mkdir -p ~/vllm-opencode-setup && cp '$src'/*.sh '$src'/*.py ~/vllm-opencode-setup/ && sed -i 's/\r$//' ~/vllm-opencode-setup/*.sh ~/vllm-opencode-setup/*.py"
 if ($SkipVllm) {
     Warn "略過（-SkipVllm），沿用 WSL 裡已安裝的 vLLM"
@@ -327,7 +327,7 @@ if ($Mirrored -and $ip) {
 
 if (-not $SkipOpencode) {
     Step "9. 在這台 Windows 安裝 opencode"
-    & (Join-Path $ScriptDir "..\client\install-client.ps1") -Url "http://127.0.0.1:$Port/v1" -Key $Key -Name laptop -Default
+    & (Join-Path $ScriptDir "..\..\opencode\client\install-client.ps1") -Url "http://127.0.0.1:$Port/v1" -Key $Key -Name laptop -Default
 }
 
 Step "完成！把以下資訊給實驗室同學"
@@ -336,8 +336,8 @@ Write-Host "  vLLM 網址：http://${ip}:$Port/v1" -ForegroundColor Cyan
 Write-Host "  API 金鑰 ：$Key" -ForegroundColor Cyan
 Write-Host "  模型名稱 ：$Model" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  同學的 Windows 電腦：複製 opencode 資料夾 → 雙擊 client\install-client.cmd → 貼上網址與金鑰"
-Write-Host "  同學的 Ubuntu 電腦 ：bash client/install-client.sh --url http://${ip}:$Port/v1 --key $Key --name laptop"
+Write-Host "  同學的 Windows 電腦：複製 opencode 資料夾 → 雙擊 opencode\client\install-client.cmd → 貼上網址與金鑰"
+Write-Host "  同學的 Ubuntu 電腦 ：bash opencode/client/install-client.sh --url http://${ip}:$Port/v1 --key $Key --name laptop"
 if ($EnableSsh) { Write-Host "  SSH 進這台：ssh $env:USERNAME@$ip（登入後輸入 opencode）" }
 Write-Host ""
 Write-Host "  這台自己用：開「終端機」，cd 到專案資料夾，輸入 opencode"

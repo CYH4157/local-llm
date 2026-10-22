@@ -290,5 +290,5 @@ REPLY="$(curl -fsS -m 120 "$URL/v1/chat/completions" \
 
 step "vLLM 完成"
 echo "  API：     http://<這台的IP>:$SERVE_PORT/v1   模型名稱：$SERVE_NAME"
-echo "  管理：    Windows 雙擊 host\\vllmctl.cmd（info = 給同學的連線資訊）"
+echo "  管理：    Windows 雙擊 server\\wsl2\\vllmctl.cmd；Ubuntu：./vllmctl.sh（info = 給同學的連線資訊）"
 echo "  紀錄：    journalctl -u $SERVICE -f"

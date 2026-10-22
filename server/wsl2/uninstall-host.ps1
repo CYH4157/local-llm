@@ -12,7 +12,7 @@
    5. 還原 .wslconfig 的網路模式
    6. 還原電源設定（插電時睡眠 / 休眠 / 闔上螢幕）
    7. 還原 OpenSSH 伺服器（只在 setup-host -EnableSsh 開過時）
-   8. 移除這台的 opencode 與設定（client\uninstall-client.ps1）
+   8. 移除這台的 opencode 與設定（opencode\client\uninstall-client.ps1）
  有備份（setup-host 第一次安裝時記錄）就還原成原本的值；沒有就改回 Windows 預設值，並列出來。
 
  參數：
@@ -121,7 +121,7 @@ if (-not $HasDistro) {
     }
 }
 if ($HasDistro -and -not $RemoveWsl) {
-    $src = "$(wsl.exe -d $Distro -e wslpath -a (Join-Path $ScriptDir 'wsl\uninstall-vllm.sh'))".Trim()
+    $src = "$(wsl.exe -d $Distro -e wslpath -a ([IO.Path]::GetFullPath((Join-Path $ScriptDir '..\vllm\uninstall-vllm.sh'))))".Trim()
     $flag = if ($KeepModels) { "--keep-models" } else { "" }
     # 先轉成 LF 換行再執行；指令裡不能有雙引號（PowerShell 5.1 傳給 wsl.exe 會被吃掉）
     wsl.exe -d $Distro -e bash -c "tr -d '\r' < '$src' > /tmp/uninstall-vllm.sh && bash /tmp/uninstall-vllm.sh $flag"
@@ -206,7 +206,7 @@ if (-not $Backup) {
 # --- 8. 這台的 opencode -------------------------------------------------------
 Step "8. 這台的 opencode"
 if ($KeepOpencode) { Warn "略過（-KeepOpencode）" }
-else { & (Join-Path $ScriptDir "..\client\uninstall-client.ps1") -Name laptop }
+else { & (Join-Path $ScriptDir "..\..\opencode\client\uninstall-client.ps1") -Name laptop }
 
 # --- 收尾 ---------------------------------------------------------------------
 Remove-Item (Join-Path $ScriptDir "wsl-distro.txt") -Force -ErrorAction SilentlyContinue

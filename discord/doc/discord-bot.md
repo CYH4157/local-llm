@@ -26,11 +26,11 @@ Windows 筆電
 ## 安裝
 
 ### 1. 先架好 vLLM
-雙擊 `opencode\host\setup-host.cmd`（見 [完整步驟.md 第 1 章](../完整步驟.md#1-管理者架設筆電主機一次)）。已經架好就跳過這一步。
+雙擊 `server\wsl2\setup-host.cmd`（見 [完整步驟.md 第 1 章](../../完整步驟.md#1-管理者架設筆電主機一次)）。已經架好就跳過這一步。
 
 ### 2. 跑部署腳本
 ```powershell
-cd <repo 根目錄>
+cd <repo 根目錄>\discord\client
 powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 ```
 腳本會：
@@ -48,7 +48,7 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 6. 把 token 填進 `.env` 的 `DISCORD_BOT_TOKEN=`
 
 ### 4. 啟動
-- 測試：雙擊 `start-bot.bat`
+- 測試：雙擊 `discord\client\start-bot.bat`
 - 正式：以**系統管理員**執行 `install-autostart.ps1`，登入時自動啟動 bot，掛掉也會自動重啟。WSL 常駐由 opencode 專案的 `vLLM-WSL-KeepAlive` 排程負責
 
 ---
@@ -71,7 +71,7 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 **參考資料**：產檔指令可以**附上 .txt / .md / .docx / .pdf**，或用 Discord 的「回覆」回覆某則訊息，模型會以那些內容為準。
 範例：回覆一則會議記錄訊息，輸入 `!ppt 整理成組會報告`。
 
-**範本**：把實驗室的 `ppt_template.pptx`、`word_template.docx` 放進 [templates/](../templates/README.md) 就會自動套用。
+**範本**：把實驗室的 `ppt_template.pptx`、`word_template.docx` 放進 [discord/client/templates/](../client/templates/README.md) 就會自動套用。
 
 > 本地小模型產出的是**草稿**。參考文獻一律標為「[待補]」，模型被要求不可捏造文獻；數據和論述都請人工查證。
 
@@ -80,7 +80,7 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 ## 金鑰與換模型
 
 bot 會自動從 WSL 讀金鑰、自動使用 vLLM 目前的模型，所以筆電換金鑰或換模型後**都不用改 bot 的設定**。
-怎麼取得 / 更換金鑰、怎麼換模型並套進 opencode，請看 [完整步驟.md 第 5 章](../完整步驟.md#5-日常管理管理者)。
+怎麼取得 / 更換金鑰、怎麼換模型並套進 opencode，請看 [完整步驟.md 第 5 章](../../完整步驟.md#5-日常管理管理者)。
 
 ---
 
@@ -103,12 +103,12 @@ bot 會自動從 WSL 讀金鑰、自動使用 vLLM 目前的模型，所以筆�
 
 | 症狀 | 處理 |
 |------|------|
-| Discord 顯示「連不上筆電上的 vLLM」 | `opencode\host\vllmctl.cmd` 輸入 `status`；沒在跑就 `start` |
+| Discord 顯示「連不上筆電上的 vLLM」 | `server\wsl2\vllmctl.cmd` 輸入 `status`；沒在跑就 `start` |
 | 顯示「API 金鑰錯誤」 | `.env` 的 `LLM_API_KEY` 清空，重啟 bot |
 | 顯示「內容太長」 | `!reset` 清記憶，或縮短附件；常發生就調小 `REF_MAX_CHARS` |
 | 回應很慢 | 同學正在大量使用 opencode（共用同一張顯卡），稍等即可 |
 
-## 檔案清單
+## 檔案清單（都在 `discord/client/`）
 | 檔案 | 用途 |
 |------|------|
 | `discord_bot.py` | Discord bot 本體（指令處理） |

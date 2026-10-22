@@ -14,7 +14,7 @@
    • HTTPS 憑證由 Tailscale 自動處理，金鑰與對話不會以明文在網路上傳送
    • 公開後「全世界都連得到網址」，安全全靠 API 金鑰：給校外的人之前建議 vllmctl new-key，
      用完就 off
- 對方的電腦不用裝 Tailscale，只要網址與金鑰（client\install-client.cmd 貼上即可）。
+ 對方的電腦不用裝 Tailscale，只要網址與金鑰（opencode\client\install-client.cmd 貼上即可）。
 =============================================================================
 #>
 param(
@@ -125,7 +125,7 @@ switch ($Action) {
         Write-Host "  給校外使用者（對方不用裝 Tailscale）：" -ForegroundColor Cyan
         Write-Host "    網址：$PublicUrl"
         Write-Host "    金鑰：在 vllmctl.cmd 輸入 info 查看（建議先 new-key 換一組再給）"
-        Write-Host "    安裝：雙擊 client\install-client.cmd，貼上網址與金鑰"
+        Write-Host "    安裝：雙擊 opencode\client\install-client.cmd，貼上網址與金鑰"
         Write-Host ""
         Warn "第一次開啟時，公開 DNS 最多要 10 分鐘才生效。之後可執行 funnel.cmd test 檢查。"
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  uninstall-vllm.sh — 移除 WSL / Ubuntu 裡由本專案安裝的 vLLM（由 host\uninstall-host.cmd 呼叫）
+#  uninstall-vllm.sh — 移除 WSL / Ubuntu 裡由本專案安裝的 vLLM（由 server\wsl2\uninstall-host.cmd 呼叫）
 #
 #    bash uninstall-vllm.sh [--keep-models]
 #
