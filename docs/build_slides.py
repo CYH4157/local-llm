@@ -1,8 +1,9 @@
 """
 build_slides.py — 產生「實驗室本地 LLM 使用教學」投影片（docs/實驗室本地LLM使用教學.pptx）
 
-修改內容後重新產生：
-    .venv\\Scripts\\python.exe docs\\build_slides.py
+修改內容後重新產生（在 repo 根目錄；借用 Discord bot 的 Python 環境，裡面有 python-pptx，
+先跑過 discord\\client\\deploy.ps1）：
+    discord\\client\\.venv\\Scripts\\python.exe docs\\build_slides.py
 """
 
 import os
@@ -533,7 +534,7 @@ s = content_slide("04 Discord bot", "Discord bot：接同一台 vLLM",
                   "Discord bot 不另外架模型，直接用 opencode 的 vLLM。它會自動讀 WSL 裡的金鑰，"
                   "也會自動問 vLLM 目前是哪個模型，所以之後換模型、換金鑰，bot 都不用改設定。")
 steps = ["先完成 02 的主機安裝（vLLM 要在跑）",
-         "在專案根目錄執行 deploy.ps1：建環境、自動填好 .env",
+         "在 discord\\client 執行 deploy.ps1：建環境、自動填好 .env",
          "Discord Developer Portal 建 bot，打開 MESSAGE CONTENT INTENT",
          "邀請 bot 時權限要勾 Attach Files，token 填進 .env",
          "測試：雙擊 start-bot.bat；正式：系統管理員執行 install-autostart.ps1"]
@@ -542,7 +543,7 @@ for i, st in enumerate(steps):
     badge(s, MX, y + Inches(0.05), Inches(0.5), str(i + 1), size=14)
     text(s, MX + Inches(0.7), y + Inches(0.1), Inches(6.2), Inches(0.8), st, size=16, color=INK)
 code(s, MX + Inches(7.3), TOP, CW - Inches(7.3), Inches(2.3), [
-    "# 專案根目錄",
+    ">cd discord\\client",
     ">powershell -ExecutionPolicy Bypass",
     ">  -File .\\deploy.ps1",
     "",
@@ -815,7 +816,7 @@ footer(s, dark=True)
 notes(s, "最後這頁可以截圖貼在實驗室群組。完整步驟寫在 repo 根目錄的「完整步驟.md」。")
 cols = [("安裝", [("筆電主機（server\\wsl2）", "setup-host.cmd"),
                   ("同學電腦（opencode\\client）", "install-client.cmd"),
-                  ("Discord bot", "deploy.ps1 → start-bot.bat")]),
+                  ("Discord bot（discord\\client）", "deploy.ps1 → start-bot.bat")]),
         ("使用", [("在專案資料夾", "opencode"),
                   ("opencode 裡", "/init  /models  /compact  /undo"),
                   ("Discord", "!ppt  !word  !excel  !web")]),
