@@ -38,7 +38,45 @@ for svc in vllm llama-swap; do
 done
 sudo systemctl daemon-reload 2>/dev/null || true
 
-step "2. 刪除安裝資料夾"
+# 模型要在刪掉 ~/vllm-server 之前處理：用 venv 裡的 hf 工具刪，才能正確釋放空間
+# （新版 Hugging Face 快取把權重放在共用的 hub/blobs，只刪 models--* 資料夾空間不會釋放）
+step "2. 刪除本專案下載的模型"
+if [ "$KEEP_MODELS" = 1 ]; then
+    warn "略過（--keep-models），模型留在 $HUB"
+else
+    # 內建組合 + 目前的模型 + vllmctl 記錄過的模型（~/vllm-server/models/*.env）
+    MODELS="Qwen/Qwen3-4B-Instruct-2507-FP8 Qwen/Qwen3-8B-AWQ Qwen/Qwen3-14B-AWQ \
+            Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8 Qwen/Qwen2.5-7B-Instruct-AWQ $CURRENT_MODEL"
+    for p in "$APP_DIR"/models/*.env; do
+        [ -f "$p" ] && MODELS="$MODELS $(. "$p" 2>/dev/null; printf %s "${SERVE_MODEL:-}")"
+    done
+    MODELS="$(printf '%s\n' $MODELS | sort -u)"
+    HF="$APP_DIR/.venv/bin/hf"
+    [ -x "$HF" ] || HF="$(command -v hf || true)"
+    export HF_HUB_DISABLE_UPDATE_CHECK=1
+    freed=0
+    if [ -n "$HF" ]; then
+        cached="$("$HF" cache ls -q 2>/dev/null)"
+        for m in $MODELS; do
+            if printf '%s\n' "$cached" | grep -qx "model/$m"; then
+                "$HF" cache rm -y "model/$m" >/dev/null 2>&1 && { ok "已刪除 $m"; freed=1; } || warn "刪除 $m 失敗"
+            fi
+        done
+        left="$("$HF" cache ls -q 2>/dev/null | grep -c '^model/' || true)"
+    else
+        # 沒有 hf 工具時退回直接刪資料夾（舊版快取格式可以釋放空間；新版格式的權重可能留在 hub/blobs）
+        for m in $MODELS; do
+            dir="$HUB/models--${m//\//--}"
+            if [ -d "$dir" ]; then rm -rf "$dir"; ok "已刪除 $m"; freed=1; fi
+        done
+        left="$(ls -d "$HUB"/models--* 2>/dev/null | wc -l)"
+        warn "找不到 hf 工具：如果 $HUB/blobs 仍很大，請手動檢查"
+    fi
+    [ "$freed" = 1 ] || ok "沒有找到本專案下載的模型"
+    [ "${left:-0}" -gt 0 ] && warn "快取裡還有 $left 個其他模型（不是本專案下載的，保留）"
+fi
+
+step "3. 刪除安裝資料夾"
 for d in "$APP_DIR" "$HOME/vllm-opencode-setup" "$HOME/bench-results"; do
     if [ -e "$d" ]; then rm -rf "$d"; ok "已刪除 $d"; fi
 done
@@ -47,27 +85,6 @@ if [ -x "$HOME/llm/llama-swap" ] && [ -f "$HOME/llm/llama-swap.yaml" ]; then
     rm -rf "$HOME/llm/.venv" "$HOME/llm/llama-swap" "$HOME/llm/llama-swap.yaml" \
            "$HOME/llm/llama-swap.yaml.bak" "$HOME/llm/llama-swap.env"
     rmdir "$HOME/llm" 2>/dev/null && ok "已刪除舊版 llama-swap（~/llm）" || ok "已刪除舊版 llama-swap 的檔案（~/llm 裡還有其他東西，保留資料夾）"
-fi
-
-step "3. 刪除本專案下載的模型"
-if [ "$KEEP_MODELS" = 1 ]; then
-    warn "略過（--keep-models），模型留在 $HUB"
-else
-    MODELS="Qwen/Qwen3-4B-Instruct-2507-FP8 Qwen/Qwen3-8B-AWQ Qwen/Qwen3-14B-AWQ \
-            Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8 Qwen/Qwen2.5-7B-Instruct-AWQ $CURRENT_MODEL"
-    freed=0
-    for m in $MODELS; do
-        dir="$HUB/models--${m//\//--}"
-        if [ -d "$dir" ]; then
-            size="$(du -sh "$dir" 2>/dev/null | cut -f1)"
-            rm -rf "$dir"
-            ok "已刪除 $m（$size）"
-            freed=1
-        fi
-    done
-    [ "$freed" = 1 ] || ok "沒有找到本專案下載的模型"
-    other="$(ls -d "$HUB"/models--* 2>/dev/null | wc -l)"
-    [ "$other" -gt 0 ] && warn "$HUB 裡還有 $other 個其他模型（不是本專案下載的，保留）"
 fi
 
 step "WSL 端清除完成"

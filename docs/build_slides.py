@@ -888,7 +888,7 @@ s = content_slide("06 管理與排錯 · 換模型", "換模型的注意事項",
                   "switch 隨時可以換回原本能用的模型。repo 更新後要先跑 setup-host -SkipVllm 同步管理腳本，"
                   "加過 VPN 網段的話記得帶上同樣的 -AllowFrom。")
 notes_list = [("⏸️", "切換時中斷約 1 分鐘", "所有人（opencode、Discord）都會暫停；挑沒人用的時間或先通知"),
-              ("💾", "模型會佔硬碟", "留在 ~/.cache/huggingface/hub/；forget 不刪權重，不用的自行刪除"),
+              ("💾", "模型會佔硬碟", "forget 不刪權重；用 hf cache ls 查、hf cache rm 刪（刪資料夾不會釋放）"),
               ("🧯", "啟動失敗多半是顯存不足", "set SERVE_MAX_LEN 16384 或換小模型；switch 隨時換回能用的"),
               ("🏷️", "名稱改了要更新 client", "同學重跑 install-client；servers.json 的 models 也要改"),
               ("🔄", "先同步管理腳本", "repo 更新後執行 setup-host.cmd -SkipVllm（不會重裝 vLLM）"),
