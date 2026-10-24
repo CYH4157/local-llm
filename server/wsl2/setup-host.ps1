@@ -16,7 +16,7 @@
      5. 開放防火牆 TCP 8000（Windows 防火牆 + WSL 用的 Hyper-V 防火牆）
      6. 接上電源時不睡眠、闔上螢幕不休眠（-AllowSleep 可略過）
      7. （選用 -EnableSsh）開啟 Windows 的 OpenSSH 伺服器，讓別人 ssh 進來用這台的 opencode
-     8. 在這台 Windows 安裝 opencode 並連到本機 vLLM，最後印出給同學的連線資訊
+     8. 在這台 Windows 安裝 opencode 桌面版並連到本機 vLLM，最後印出給同學的連線資訊
 
  參數：
      -Preset small|medium|large   模型組合（預設依顯存自動選；8GB 筆電會選 small）
@@ -340,7 +340,7 @@ Write-Host "  同學的 Windows 電腦：複製 opencode 資料夾 → 雙擊 op
 Write-Host "  同學的 Ubuntu 電腦 ：bash opencode/client/install-client.sh --url http://${ip}:$Port/v1 --key $Key --name laptop"
 if ($EnableSsh) { Write-Host "  SSH 進這台：ssh $env:USERNAME@$ip（登入後輸入 opencode）" }
 Write-Host ""
-Write-Host "  這台自己用：開「終端機」，cd 到專案資料夾，輸入 opencode"
+Write-Host "  這台自己用：開始選單開「OpenCode」（桌面版），開啟專案資料夾"
 Write-Host "  管理 vLLM ：雙擊 vllmctl.cmd（status / logs / restart / preset / new-key）"
 Write-Host ""
 Warn "筆電請接電源；IP 可能因 DHCP 改變，建議請網管或在路由器幫筆電固定 IP。"

@@ -279,7 +279,7 @@ s = content_slide("01 認識系統", "三個元件各司其職",
                   "所以兩者共用同一個模型和同一張顯卡。同學的電腦不需要顯卡。")
 comps = [("🧠", "vLLM", "推論伺服器：把模型載入 GPU，提供 OpenAI 相容 API，支援 tool calling。",
           "筆電 WSL · 服務 vllm · 埠 8000"),
-         ("💻", "opencode", "終端機裡的 AI 助手：讀寫專案檔案、執行指令、寫程式、查資料、寫作業。",
+         ("💻", "opencode", "AI 助手（桌面版 / 終端機版）：讀寫專案檔案、執行指令、寫程式、查資料。",
           "每台電腦都可以裝"),
          ("💬", "Discord bot", "在 Discord 問答、上網查詢，並產生 PPT / Word / Excel 草稿檔案。",
           "跑在筆電 · 自動跟著 vLLM")]
@@ -433,15 +433,52 @@ for i, t in enumerate(todo):
     text(s, x + Inches(1.0), y, cw - Inches(1.2), rh, t, size=16, color=INK, anchor=MSO_ANCHOR.MIDDLE, space=0)
 
 # =============================================================================
+#  8b. 安裝完成：查看網址與金鑰
+# =============================================================================
+s = content_slide("02 筆電主機安裝 · 完成", "安裝完成：查看網址與 API 金鑰",
+                  "安裝結束時畫面會印一次網址與金鑰，之後忘了隨時可以查。最簡單是雙擊 vllmctl.cmd 輸入 info；"
+                  "在 PowerShell 也可以直接加參數。只想看金鑰的話，可以直接讀 WSL 裡的設定檔。"
+                  "金鑰等同密碼，只私下給實驗室成員；外流就用 new-key 換一組。Discord bot 會自動讀，不用給它。")
+code(s, MX, TOP, Inches(6.3), Inches(4.6), [
+    "# 方法 1：雙擊 server\\wsl2\\vllmctl.cmd，輸入",
+    ">info",
+    "",
+    "# 方法 2：PowerShell 直接執行（在 repo 資料夾）",
+    ">server\\wsl2\\vllmctl.cmd info",
+    "",
+    "# 方法 3：只看金鑰",
+    ">wsl -d Ubuntu -- grep SERVE_API_KEY ~/vllm-server/vllm.env",
+    "",
+    "# 換一組新金鑰（舊的立即失效）",
+    ">server\\wsl2\\vllmctl.cmd new-key",
+], size=12)   # 12pt：方法 3 的指令才能放在同一行，方便照抄
+rx, rw = MX + Inches(6.6), CW - Inches(6.6)
+text(s, rx, TOP, rw, Inches(0.35), "info 會印出", size=14, color=INK, bold=True)
+box(s, rx, TOP + Inches(0.4), rw, Inches(1.55), fill=CODEBG, line=None, radius=0.04)
+text(s, rx + Inches(0.25), TOP + Inches(0.6), rw - Inches(0.5), Inches(1.3),
+     [[("模型名稱：qwen3-4b", {"color": CODETX})],
+      [("vLLM 網址：http://192.168.1.23:8000/v1", {"color": ORANGE, "bold": True})],
+      [("API 金鑰 ：sk-vllm-3f9c…", {"color": ORANGE, "bold": True})]], size=13, mono=True, space=4)
+for i, (ic, t, d) in enumerate([("👥", "給同學：網址 + 金鑰", "同學雙擊 install-client.cmd 貼上"),
+                                 ("💬", "Discord bot 不用給", "自動從 WSL 讀，換金鑰也會自動重讀"),
+                                 ("🌐", "國網 API 金鑰是另一把", "來自國網的通知信，不在 vllmctl 裡")]):
+    y = TOP + Inches(2.15) + Inches(0.83) * i
+    box(s, rx, y, rw, Inches(0.72))
+    badge(s, rx + Inches(0.15), y + Inches(0.11), Inches(0.5), ic, fill=TINT, size=13)
+    text(s, rx + Inches(0.8), y + Inches(0.08), rw - Inches(0.95), Inches(0.6),
+         [[(t, {"bold": True, "color": INK, "size": 14})], [(d, {"size": 12})]], space=1)
+
+# =============================================================================
 #  9. 同學電腦安裝 opencode
 # =============================================================================
 s = content_slide("03 同學使用 opencode", "同學的電腦：雙擊 install-client.cmd",
                   "同學的電腦不需要顯卡。安裝程式會先測試能不能連到筆電，連不到會直接說原因，"
-                  "常見是筆電休眠、IP 打錯或不在同一個網路。裝完一定要開新的終端機，PATH 才會生效。")
+                  "常見是筆電休眠、IP 打錯或不在同一個網路。預設安裝桌面版，不會用終端機的同學也能直接用；"
+                  "習慣終端機的同學加 -Terminal 另外安裝終端機版。")
 steps = ["向管理者拿「網址」和「API 金鑰」（筆電 vllmctl.cmd 輸入 info）",
-         "複製專案的 opencode\\client 資料夾到自己電腦",
+         "複製專案的整個 opencode\\client 資料夾到自己電腦",
          "雙擊 install-client.cmd，貼上網址與金鑰",
-         "開一個新的終端機，cd 到專案資料夾，輸入 opencode"]
+         "開始選單開「OpenCode」，開啟專案資料夾"]
 for i, st in enumerate(steps):
     y = TOP + Inches(1.0) * i
     badge(s, MX, y + Inches(0.05), Inches(0.5), str(i + 1), size=14)
@@ -451,34 +488,101 @@ code(s, MX + Inches(7.2), TOP, CW - Inches(7.2), Inches(2.6), [
     ">http://192.168.1.23:8000/v1",
     "",
     "# 腳本自動完成",
-    "1. 測試連線  2. 用 Scoop 裝 opencode",
+    "1. 測試連線  2. 安裝桌面版",
     "3. 寫入 opencode.json  4. 裝共用規則",
 ], size=13)
 box(s, MX + Inches(7.2), TOP + Inches(2.85), CW - Inches(7.2), Inches(1.75))
 text(s, MX + Inches(7.5), TOP + Inches(3.05), CW - Inches(7.8), Inches(1.5),
-     [[("Ubuntu 電腦", {"bold": True, "color": INK, "size": 15})],
-      [("bash opencode/client/install-client.sh --url <網址> --key <金鑰> --name laptop", {"mono": True, "size": 12})],
-      [("桌面版：opencode.ai/download 下載，再用 -SkipInstall 跑一次", {"size": 12})]], space=6)
+     [[("加入其他伺服器：不用重裝", {"bold": True, "color": INK, "size": 15})],
+      [("install-client.cmd -Url <網址> -Key <金鑰> -Name server2 -SkipInstall", {"mono": True, "size": 12})],
+      [("終端機版：加 -Terminal　·　Ubuntu：install-client.sh", {"size": 12})]], space=6)
+
+# =============================================================================
+#  9b. servers.json：管理者預先填好伺服器
+# =============================================================================
+s = content_slide("03 同學使用 opencode · 管理者", "servers.json：先填好，同學雙擊就加入",
+                  "管理者把 opencode\\servers.example.json 複製成 servers.json，填好每台伺服器的網址和金鑰，"
+                  "再把整個 opencode 資料夾私下給同學。同學雙擊 install-client.cmd 就會依序加入每一台，不用自己輸入。"
+                  "最常見的錯誤是 name 用了中文：name 只能英數字，中文名稱請放在 label。"
+                  "國網這種每個人有自己金鑰的，key 留空，執行時會問。servers.json 有金鑰，已在 .gitignore 裡，不會上傳。")
+code(s, MX, TOP, Inches(5.7), Inches(4.6), [
+    '{ "servers": [',
+    '  { "name": "labgpt",',
+    '    "label": "實驗室GPT",',
+    '    "url": "http://140.110.146.54:8000/v1",',
+    '    "key": "sk-vllm-…",',
+    '    "default": true },',
+    '  { "name": "nchc",',
+    '    "label": "NCHC GenAI",',
+    '    "url": "https://inner-medusa.genai.nchc.org.tw/v1",',
+    '    "key": "",',
+    '    "context": 32768,',
+    '    "models": ["gpt-oss-120b", "GLM-5.2"] }',
+    ']}',
+], size=12)
+table(s, MX + Inches(6.0), TOP, CW - Inches(6.0), [
+    ["欄位", "怎麼填"],
+    ["name", "英數字代號，不能用中文、不能重複"],
+    ["label", "opencode 裡顯示的名稱，可以用中文"],
+    ["url", "伺服器網址，結尾要有 /v1"],
+    ["key", "API 金鑰；留空 = 執行時再問（國網）"],
+    ["default", "true = 設成預設模型（只設一台）"],
+    ["models", "只加入這些模型；不填 = 全部"],
+    ["context", "伺服器沒回報時的上下文（國網 32768）"],
+    ["enabled", "false = 先不加入"],
+], [1.5, 4.2], size=13, rowh=0.44, mono_cols=(0,))
+text(s, MX + Inches(6.0), TOP + Inches(4.1), CW - Inches(6.0), Inches(0.5),
+     [[("⚠️ servers.json 有金鑰：只私下傳給同學，不要上傳或貼到群組", {"color": RED, "bold": True})]], size=12)
+
+# =============================================================================
+#  9c. 查看伺服器上有哪些模型
+# =============================================================================
+s = content_slide("03 同學使用 opencode · 管理者", "查看伺服器上有哪些模型",
+                  "填 servers.json 的 models 欄位前，先查伺服器上有哪些模型。實驗室的 vLLM 一次只載入一個模型，"
+                  "所以只會列出一個；國網會列出很多個，請挑支援工具呼叫的填進去。"
+                  "PowerShell 的 Invoke-RestMethod 可以只列出模型名稱，方便直接複製。install-client 執行時第 1 步也會列出。")
+code(s, MX, TOP, Inches(7.4), Inches(4.6), [
+    "# 實驗室主機（在主機筆電上）",
+    ">server\\wsl2\\vllmctl.cmd info      # 目前載入的模型",
+    ">server\\wsl2\\vllmctl.cmd models    # 用過的模型（可 switch）",
+    "",
+    "# 任何電腦（PowerShell）：先設網址與金鑰",
+    '>$u = "http://140.110.146.54:8000/v1"',
+    '>$k = "你的金鑰"',
+    '>(irm "$u/models" -Headers @{Authorization="Bearer $k"}).data.id',
+    "",
+    "# 國網：換成國網網址與自己的金鑰，再執行上面那行 irm",
+    '>$u = "https://inner-medusa.genai.nchc.org.tw/v1"',
+], size=12)
+rx, rw = MX + Inches(7.7), CW - Inches(7.7)
+for i, (ic, t, d) in enumerate([("1️⃣", "實驗室 vLLM：只會有 1 個", "一次只載入一個模型，換模型用 vllmctl"),
+                                 ("📋", "國網：會列出很多個", "挑支援工具呼叫的，填進 servers.json 的 models"),
+                                 ("🔎", "install-client 也會列出", "執行時第 1 步「測試連線」會顯示模型清單")]):
+    y = TOP + Inches(1.55) * i
+    box(s, rx, y, rw, Inches(1.35))
+    badge(s, rx + Inches(0.2), y + Inches(0.25), Inches(0.6), ic, fill=TINT, size=16)
+    text(s, rx + Inches(0.95), y + Inches(0.2), rw - Inches(1.1), Inches(1.0),
+         [[(t, {"bold": True, "color": INK, "size": 15})], [(d, {"size": 13})]], space=3, line=1.1)
 
 # =============================================================================
 #  10. 第一次開啟 opencode
 # =============================================================================
 s = content_slide("03 同學使用 opencode", "第一次開啟 opencode",
-                  "opencode 只會讀寫目前資料夾底下的檔案，所以要先 cd 到專案資料夾再啟動。"
+                  "opencode 只會讀寫你開啟的那個專案資料夾底下的檔案，所以一定要先開啟專案資料夾。"
                   "第一次進專案先打 /init，它會產生 AGENTS.md 記錄專案結構，小模型有了它表現好很多。")
 code(s, MX, TOP, Inches(5.6), Inches(4.4), [
-    "# 開新的終端機",
+    "# 桌面版",
+    ">開始選單 → OpenCode → 開啟專案資料夾",
+    "",
+    "# 終端機版（-Terminal 才有）",
     "cd C:\\Users\\你\\Documents\\my-thesis",
     ">opencode",
     "",
     "# 第一次進這個專案",
     ">/init",
-    "",
-    "# 確認用的是筆電的模型",
-    "/models",
 ], size=15)
 tips = [("下方輸入框", "用中文描述需求，Enter 送出"),
-        ("畫面下方顯示 laptop/qwen3-4b", "代表正在用筆電的 vLLM"),
+        ("模型選單 / 輸入 /models", "選 laptop/qwen3-4b = 筆電的 vLLM"),
         ("Tab 鍵", "切換 Build（會改檔）／ Plan（只分析不改）"),
         ("/init", "產生 AGENTS.md，之後每次對話都會參考")]
 rx = MX + Inches(6.0)
@@ -676,9 +780,10 @@ table(s, MX, TOP, CW, [
     ["start · stop · restart", "啟動 / 停止（釋放 GPU）/ 重啟"],
     ["presets · preset 名稱", "列出 / 換成內建模型組合"],
     ["model HF模型ID 名稱 上下文 parser", "換成任意 Hugging Face 模型"],
+    ["models · switch 名稱", "列出用過的模型 / 切換回去（設定會保留）"],
     ["set 參數 值 · edit", "修改 vllm.env 參數並重啟"],
     ["new-key · bench", "產生新金鑰 / 跑標準測試"],
-], [4, 6], size=15, rowh=0.5, mono_cols=(0,))
+], [4, 6], size=14, rowh=0.46, mono_cols=(0,))
 
 # =============================================================================
 #  19. API 金鑰
@@ -708,36 +813,93 @@ text(s, MX, TOP + Inches(4.25), CW, Inches(0.35),
 # =============================================================================
 #  20. 換模型
 # =============================================================================
-s = content_slide("06 管理與排錯 · 換模型", "vLLM 換新模型，四個步驟",
+s = content_slide("06 管理與排錯 · 換模型", "vLLM 換模型：五個步驟",
                   "vLLM 一次只載入一個模型，換模型就是下載新的再換掉舊的。vllmctl 會先下載完才切換，"
-                  "下載期間大家照常使用，切換時中斷約一分鐘。換完一定要跑 bench，再請大家重跑 install-client，"
-                  "原本指向舊模型的預設值會自動改成新模型。Discord bot 不用動。")
-flow = [("1", "換模型", "vllmctl.cmd\npreset quality\n或 model …"),
-        ("2", "確認正常", "vllmctl.cmd\nbench（約 1 分鐘）"),
-        ("3", "更新 opencode", "每台重跑\ninstall-client.cmd"),
-        ("4", "Discord bot", "不用動\n!model 確認")]
-fw = (CW - Inches(0.3) * 3) / 4
+                  "下載期間大家照常使用，切換時中斷約一分鐘。換完一定要跑 bench；不滿意就用 switch 換回來，"
+                  "設定會保留、也不用重新下載。最後請大家重跑 install-client，預設模型會自動更新。Discord bot 不用動。")
+flow = [("1", "換模型", "preset quality\n或 model …"),
+        ("2", "跑測試", "bench\n（約 1 分鐘）"),
+        ("3", "不滿意就換回", "switch\nqwen3-4b"),
+        ("4", "更新 opencode", "每台重跑\ninstall-client"),
+        ("5", "Discord bot", "不用動\n!model 確認")]
+fw = (CW - Inches(0.25) * 4) / 5
 for i, (n, t, d) in enumerate(flow):
-    x = MX + (fw + Inches(0.3)) * i
-    box(s, x, TOP, fw, Inches(1.9))
-    badge(s, x + Inches(0.25), TOP + Inches(0.25), Inches(0.5), n, size=14, fill=ORANGE if i == 3 else BLUE)
-    text(s, x + Inches(0.9), TOP + Inches(0.28), fw - Inches(1.0), Inches(0.45), t, size=16, color=INK, bold=True)
-    text(s, x + Inches(0.25), TOP + Inches(0.9), fw - Inches(0.5), Inches(0.9), d.split("\n"), size=13, space=1)
-code(s, MX, TOP + Inches(2.2), Inches(5.6), Inches(2.4), [
-    "# 內建組合",
-    ">preset quality   # Qwen3-8B",
-    ">preset laptop    # 換回 Qwen3-4B",
-    "",
-    "# 任意 Hugging Face 模型",
+    x = MX + (fw + Inches(0.25)) * i
+    box(s, x, TOP, fw, Inches(1.75))
+    badge(s, x + Inches(0.2), TOP + Inches(0.22), Inches(0.48), n, size=14, fill=ORANGE if i == 4 else BLUE)
+    text(s, x + Inches(0.78), TOP + Inches(0.25), fw - Inches(0.85), Inches(0.45), t, size=15, color=INK, bold=True)
+    text(s, x + Inches(0.2), TOP + Inches(0.85), fw - Inches(0.35), Inches(0.85), d.split("\n"), size=13, space=1, mono=True)
+code(s, MX, TOP + Inches(2.05), Inches(5.6), Inches(2.55), [
+    "# 都在 server\\wsl2\\vllmctl.cmd 裡輸入",
+    ">preset quality   # 內建組合：Qwen3-8B",
     ">model Qwen/Qwen3-8B-AWQ qwen3-8b 32768 hermes",
+    ">models           # 列出用過的模型",
+    ">switch qwen3-4b  # 換回去（設定保留）",
+    ">bench            # 跑標準測試",
 ], size=13)
-table(s, MX + Inches(5.9), TOP + Inches(2.2), CW - Inches(5.9), [
-    ["欄位", "說明"],
+table(s, MX + Inches(5.9), TOP + Inches(2.05), CW - Inches(5.9), [
+    ["model 的欄位", "說明"],
     ["Qwen/Qwen3-8B-AWQ", "Hugging Face 模型 ID"],
-    ["qwen3-8b", "opencode 裡顯示的名字"],
+    ["qwen3-8b", "opencode 裡顯示的名字（英數字）"],
     ["32768", "上下文；opencode 至少 16384"],
-    ["hermes", "Qwen 用 hermes；Coder 用 qwen3_coder"],
-], [2.3, 3.4], size=13, rowh=0.46, mono_cols=(0,))
+    ["hermes", "tool parser，依模型系列選（下一頁）"],
+], [2.3, 3.4], size=13, rowh=0.48, mono_cols=(0,))
+
+# =============================================================================
+#  20b. 使用 Hugging Face 上的模型
+# =============================================================================
+s = content_slide("06 管理與排錯 · 換模型", "使用 Hugging Face 上的模型（例：Llama 3.2）",
+                  "vLLM 直接從 Hugging Face 下載模型，所以大部分模型都能用，但要符合幾個條件：要用 Instruct 版；"
+                  "授權模型（例如 Meta 的 Llama）要先在模型頁面同意條款並設定 token；格式用原始權重或 AWQ / FP8，GGUF 不建議；"
+                  "顯存要放得下；而且要支援工具呼叫並選對 parser。小模型通常比預設的 Qwen3-4B 弱，一定要跑 bench 比較。")
+table(s, MX, TOP, Inches(6.9), [
+    ["條件", "以 Llama 3.2 為例"],
+    ["要用 Instruct 版", "Llama-3.2-3B-Instruct"],
+    ["授權模型先同意條款 + token", "Meta Llama 要；Qwen 不用"],
+    ["顯存放得下（12GB 約到 8B 量化）", "1B、3B 可以；11B Vision 不行"],
+    ["格式：原始權重 / AWQ / FP8", "GGUF 不建議"],
+    ["支援 tool calling + 選對 parser", "llama3_json"],
+], [3.5, 3.4], size=13, rowh=0.5)
+code(s, MX, TOP + Inches(3.25), Inches(6.9), Inches(1.35), [
+    ">set HF_TOKEN hf_xxxxxxxx",
+    ">model meta-llama/Llama-3.2-3B-Instruct llama3.2-3b 32768 llama3_json",
+    ">bench",
+], size=12)
+table(s, MX + Inches(7.2), TOP, CW - Inches(7.2), [
+    ["模型系列", "tool parser"],
+    ["Qwen2.5 / Qwen3", "hermes"],
+    ["Qwen3-Coder", "qwen3_coder"],
+    ["Llama 3.1 / 3.2 / 3.3", "llama3_json"],
+    ["Llama 4", "llama4_pythonic"],
+    ["Mistral", "mistral"],
+    ["Gemma 4", "gemma4"],
+    ["GLM-4.5", "glm45"],
+    ["gpt-oss", "openai"],
+], [2.6, 2.3], size=13, rowh=0.46, mono_cols=(1,))
+text(s, MX + Inches(7.2), TOP + Inches(4.25), CW - Inches(7.2), Inches(0.4),
+     "選錯 parser：回應會直接出現 <tool_call> 文字", size=12, color=MUTED)
+
+# =============================================================================
+#  20c. 換模型的注意事項
+# =============================================================================
+s = content_slide("06 管理與排錯 · 換模型", "換模型的注意事項",
+                  "切換模型時 vLLM 會重啟，所有人都會暫停約一分鐘，挑沒人用的時間或先通知。"
+                  "下載過的模型會一直留在 WSL 裡佔硬碟，forget 不會刪權重。啟動失敗多半是顯存不足，調小上下文或換小模型，"
+                  "switch 隨時可以換回原本能用的模型。repo 更新後要先跑 setup-host -SkipVllm 同步管理腳本，"
+                  "加過 VPN 網段的話記得帶上同樣的 -AllowFrom。")
+notes_list = [("⏸️", "切換時中斷約 1 分鐘", "所有人（opencode、Discord）都會暫停；挑沒人用的時間或先通知"),
+              ("💾", "模型會佔硬碟", "留在 ~/.cache/huggingface/hub/；forget 不刪權重，不用的自行刪除"),
+              ("🧯", "啟動失敗多半是顯存不足", "set SERVE_MAX_LEN 16384 或換小模型；switch 隨時換回能用的"),
+              ("🏷️", "名稱改了要更新 client", "同學重跑 install-client；servers.json 的 models 也要改"),
+              ("🔄", "先同步管理腳本", "repo 更新後執行 setup-host.cmd -SkipVllm（不會重裝 vLLM）"),
+              ("🧱", "別讓防火牆被重設", "加過 VPN 網段：同步時也帶上 -AllowFrom")]
+cw, ch = (CW - Inches(0.3)) / 2, Inches(1.35)
+for i, (ic, t, d) in enumerate(notes_list):
+    x, y = MX + (cw + Inches(0.3)) * (i % 2), TOP + (ch + Inches(0.2)) * (i // 2)
+    box(s, x, y, cw, ch)
+    badge(s, x + Inches(0.25), y + Inches(0.32), Inches(0.65), ic, fill=TINT, size=18)
+    text(s, x + Inches(1.1), y + Inches(0.22), cw - Inches(1.3), Inches(1.0),
+         [[(t, {"bold": True, "color": INK, "size": 16})], [(d, {"size": 13})]], space=4, line=1.1)
 
 # =============================================================================
 #  21. 安全性
@@ -771,7 +933,7 @@ table(s, MX, TOP, CW, [
     ["啟動失敗、顯存不足（OOM）", "vllmctl.cmd → set SERVE_MAX_LEN 16384 或 set SERVE_GPU_UTIL 0.80"],
     ["opencode 報超過 context 上限", "/compact 或 /new；常發生就加大 SERVE_MAX_LEN"],
     ["Discord：連不上 vLLM / 金鑰錯誤", "vllmctl.cmd → status；.env 的 LLM_API_KEY 清空後重啟 bot"],
-    ["輸入 opencode 找不到指令", "開一個新的終端機視窗"],
+    ["桌面版 port already in use", "主機筆電才會遇到：重跑 install-client 會自動修正"],
 ], [3.8, 6.2], size=14, rowh=0.52)
 
 # =============================================================================

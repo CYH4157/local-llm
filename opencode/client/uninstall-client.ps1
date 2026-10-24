@@ -109,12 +109,29 @@ if ($KeepProgram) {
     }
     if (-not $removed) {
         if (Get-Command opencode -ErrorAction SilentlyContinue) {
-            Warn "opencode 不是用 Scoop / npm 安裝的（$((Get-Command opencode).Source)），請自行移除"
+            Warn "終端機版 opencode 不是用 Scoop / npm 安裝的（$((Get-Command opencode).Source)），請自行移除"
         } else {
-            Ok "沒有安裝 opencode 程式"
+            Ok "沒有安裝終端機版"
         }
     }
-    Warn "有裝 opencode 桌面版的話，請到「設定 → 應用程式」解除安裝"
+    # 桌面版：用安裝程式登記的靜默解除安裝指令（只裝給目前使用者，不需系統管理員）
+    $entry = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+             Where-Object { $_.DisplayName -match '^OpenCode\b' -and $_.QuietUninstallString } | Select-Object -First 1
+    if ($entry) {
+        Get-Process OpenCode -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        if ($entry.QuietUninstallString -match '^"([^"]+)"\s*(.*)$') {
+            Start-Process $Matches[1] -ArgumentList $Matches[2] -Wait
+        }
+        if (Test-Path (Join-Path $env:LOCALAPPDATA "Programs\@opencodedesktop\OpenCode.exe")) {
+            Warn "桌面版沒有移除乾淨，請到「設定 → 應用程式」解除安裝 OpenCode"
+        } else {
+            Ok "已移除桌面版（$($entry.DisplayName)）"
+        }
+        $data = Join-Path $env:APPDATA "ai.opencode.desktop"
+        if (Test-Path $data) { Warn "桌面版的對話紀錄與設定保留在 $data（不需要可自行刪除）" }
+    } else {
+        Ok "沒有安裝桌面版"
+    }
 }
 
 Step "完成"

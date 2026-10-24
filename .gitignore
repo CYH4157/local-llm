@@ -27,3 +27,6 @@ server/wsl2/wsl-distro.txt
 opencode/servers.json
 # 舊版腳本備份（不上傳）
 _archive/
+
+# Office 開檔時的暫存鎖定檔
+~$*
