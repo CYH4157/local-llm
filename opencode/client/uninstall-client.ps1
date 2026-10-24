@@ -35,6 +35,7 @@ if ($Name) {
 
 # --- 1. opencode 設定 ---------------------------------------------------------
 Step "1. 移除 opencode 設定裡的 provider「$($names -join ', ')」"
+$providersLeft = @()   # 移除後還剩下的 provider（有剩就保留共用規則）
 if (-not (Test-Path $cfgPath)) {
     Ok "沒有設定檔，略過"
 } else {
@@ -54,6 +55,7 @@ if (-not (Test-Path $cfgPath)) {
                 if ($cfg.PSObject.Properties[$p] -and "$($cfg.$p)" -like "$n/*") { $cfg.PSObject.Properties.Remove($p) }
             }
         }
+        if ($cfg.PSObject.Properties['provider']) { $providersLeft = @($cfg.provider.PSObject.Properties.Name) }
         $left = @($cfg.PSObject.Properties | Where-Object { $_.Name -ne '$schema' -and
                   -not ($_.Name -eq 'provider' -and @($_.Value.PSObject.Properties).Count -eq 0) })
         if ($left.Count -eq 0) {
@@ -70,7 +72,9 @@ Remove-Item "$cfgPath.bak" -Force -ErrorAction SilentlyContinue   # install-clie
 # --- 2. 實驗室共用規則 --------------------------------------------------------
 Step "2. 移除實驗室共用規則（AGENTS.md）"
 $rules = Join-Path $cfgDir "AGENTS.md"
-if ((Test-Path $rules) -and (Select-String -Path $rules -Pattern "lab-opencode-rules" -Quiet)) {
+if ($providersLeft.Count -gt 0) {
+    Ok "還有其他伺服器（$($providersLeft -join ', ')），保留共用規則"
+} elseif ((Test-Path $rules) -and (Select-String -Path $rules -Pattern "lab-opencode-rules" -Quiet)) {
     Remove-Item $rules -Force
     Ok "已刪除 $rules"
 } elseif (Test-Path $rules) {
