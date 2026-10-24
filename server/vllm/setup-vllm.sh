@@ -145,8 +145,22 @@ fi
 [ "$EXTRA_SET" = 0 ]  || SERVE_EXTRA_ARGS="$EXTRA"
 # 顯存已被其他程式占用時（Windows 桌面、瀏覽器…），自動調低 SERVE_GPU_UTIL，保留 1GB 緩衝
 read -r MEM_TOTAL MEM_USED < <(nvidia-smi --query-gpu=memory.total,memory.used --format=csv,noheader,nounits | head -n1 | tr -d ',')
+# 重新執行本腳本時 vLLM 服務可能正在跑：它自己佔的顯存不能算成「其他程式」，否則會被誤調到最低
+OWN_MEM=0; OWN_UNKNOWN=0
+if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+    while IFS=, read -r pid mem; do
+        pid="${pid//[[:space:]]/}"; mem="${mem//[[:space:]]/}"
+        grep -q "/$SERVICE.service" "/proc/$pid/cgroup" 2>/dev/null || continue
+        if [[ "$mem" =~ ^[0-9]+$ ]]; then OWN_MEM=$((OWN_MEM + mem)); else OWN_UNKNOWN=1; fi
+    done < <(nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits 2>/dev/null)
+    # WSL 的 nvidia-smi 看不到各程序用量（[N/A]）→ 無法區分，沿用原本的 SERVE_GPU_UTIL
+    [ "$OWN_MEM" -gt 0 ] || OWN_UNKNOWN=1
+fi
+MEM_USED=$((MEM_USED - OWN_MEM))
 MAX_UTIL="$(python3 -c "t,u=$MEM_TOTAL,$MEM_USED; print(max(0.30, int((t-u-1024)/t*20)/20))")"
-if python3 -c "import sys; sys.exit(0 if $SERVE_GPU_UTIL > $MAX_UTIL else 1)"; then
+if [ "$OWN_UNKNOWN" = 1 ]; then
+    warn "vLLM 服務正在執行、無法分辨它佔用的顯存，SERVE_GPU_UTIL 維持 $SERVE_GPU_UTIL（重啟後若顯存不足：vllmctl set SERVE_GPU_UTIL 0.80）"
+elif python3 -c "import sys; sys.exit(0 if $SERVE_GPU_UTIL > $MAX_UTIL else 1)"; then
     warn "GPU 已被其他程式使用 ${MEM_USED} MiB / ${MEM_TOTAL} MiB，SERVE_GPU_UTIL 由 $SERVE_GPU_UTIL 調低為 $MAX_UTIL"
     SERVE_GPU_UTIL="$MAX_UTIL"
 fi
