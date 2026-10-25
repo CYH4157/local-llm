@@ -7,7 +7,7 @@
 #    status | logs            服務狀態 / 即時紀錄（Ctrl+C 離開）
 #    start | stop | restart   啟動 / 停止（釋放 GPU）/ 重啟
 #    presets                  列出內建模型組合
-#    preset NAME              換成內建組合（small / laptop / quality / medium / large）
+#    preset NAME              換成內建組合（small / laptop / quality / medium / large / xlarge）
 #    model HF_ID [NAME] [MAX_LEN] [TOOL_PARSER]
 #                             換成任意 Hugging Face 模型（先下載再切換）
 #    models                   列出用過的模型（可直接 switch 回去，設定會保留）
@@ -97,7 +97,7 @@ list_profiles() {
         printf '%s %-3s %-24s %-46s %-7s %s\n' "$([ "$n" = "$SERVE_NAME" ] && echo '*' || echo ' ')" "$i" "$n" "$m" "$len" "$dl"
     done < <(profile_names)
     echo
-    echo "  內建組合（也可以 switch）：small / laptop / quality / medium / large（vllmctl presets 看說明）"
+    echo "  內建組合（也可以 switch）：small / laptop / quality / medium / large / xlarge（vllmctl presets 看說明）"
 }
 
 client_reminder() {
@@ -137,7 +137,7 @@ case "$cmd" in
     presets) list_presets ;;
     preset)
         [ -n "${1:-}" ] || { list_presets; die "用法：vllmctl preset NAME"; }
-        apply_preset "$1"
+        gpu_detect; apply_preset "$1"
         save_profile
         set_var SERVE_MODEL "$PRESET_MODEL";        set_var SERVE_NAME "$PRESET_NAME"
         set_var SERVE_MAX_LEN "$PRESET_MAX_LEN";    set_var SERVE_GPU_UTIL "$PRESET_GPU_UTIL"
@@ -179,7 +179,7 @@ case "$cmd" in
             hf_download "$SERVE_MODEL"
         else
             # 不在清單裡就當成內建組合（apply_preset 認不得會報錯）
-            apply_preset "$T"
+            gpu_detect; apply_preset "$T"
             save_profile
             set_var SERVE_MODEL "$PRESET_MODEL";        set_var SERVE_NAME "$PRESET_NAME"
             set_var SERVE_MAX_LEN "$PRESET_MAX_LEN";    set_var SERVE_GPU_UTIL "$PRESET_GPU_UTIL"

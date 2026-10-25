@@ -3,12 +3,19 @@
 #  setup-vllm.sh — 在 Ubuntu（筆電或伺服器）安裝 vLLM，註冊成 systemd 服務 vllm
 #
 #  用法：
-#      bash setup-vllm.sh                       # 依顯存自動挑模型
-#      bash setup-vllm.sh --preset laptop       # small / laptop / quality / medium / large
+#      bash setup-vllm.sh                       # 依 GPU 自動挑模型與參數
+#      bash setup-vllm.sh --preset laptop       # small / laptop / quality / medium / large / xlarge
 #      bash setup-vllm.sh --model Qwen/Qwen3-8B-AWQ --name qwen3-8b --max-len 16384 --tool-parser hermes
 #
 #  參數：
-#      --preset NAME       small(8~10GB) / laptop(11~15GB) / quality / medium(16~24GB) / large(48GB+)
+#      --preset NAME       small(8~10GB) / laptop(11~15GB) / quality / medium(16~45GB) / large(46~99GB) / xlarge(100GB+)
+#
+#  依 GPU 自動調整（不用手動設定）：
+#      顯存     → 模型組合：RTX 4070 Laptop 8GB=small、RTX 4070 / 5070 Ti 12GB=laptop、H100-20C vGPU=medium、
+#                 H100 80GB=large、H200 141GB=xlarge
+#      架構     → 注意力後端：RTX 50（Blackwell）沒有 CUDA Toolkit 時用 Triton，其他交給 vLLM 選 FlashAttention
+#                 RTX 30 / A100（沒有 FP8 硬體）KV cache 不用 FP8
+#      驅動版本 → 驅動只到 CUDA 12.x（例如 vGPU）時裝 vLLM 的 CUDA 12.9 版
 #      --model  HF_ID      自訂 Hugging Face 模型（搭配 --name / --max-len / --tool-parser）
 #      --name   NAME       對外的模型名稱（opencode 裡看到的名字）
 #      --max-len N         上下文長度
@@ -71,7 +78,10 @@ if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi >/dev/null 2>&1; then
     exit 2
 fi
 nvidia-smi --query-gpu=index,name,memory.total,driver_version --format=csv,noheader
-ok "GPU 可用"
+gpu_detect
+ok "GPU 可用：$GPU_NAME（$GPU_ARCH，compute $GPU_CC，$((GPU_MEM_MIB / 1024)) GB）"
+[ "${GPU_COUNT:-1}" -le 1 ] || warn "偵測到 $GPU_COUNT 張 GPU，預設只用第一張；要合併使用：--extra \"--tensor-parallel-size $GPU_COUNT\""
+case "${GPU_CC%%.*}" in 7) warn "$GPU_ARCH 顯卡較舊，vLLM 部分功能不支援；建議至少 RTX 30 系列" ;; esac
 
 # systemd：vLLM 要註冊成服務。WSL 預設沒開，開啟後要 wsl --shutdown 重啟才生效
 if [ "$(ps -p 1 -o comm=)" != "systemd" ]; then
@@ -127,7 +137,7 @@ fi
 if [ -n "$PRESET" ] || { [ -z "$MODEL" ] && [ -z "${SERVE_MODEL:-}" ]; }; then
     [ -n "$PRESET" ] || PRESET="$(auto_preset)"
     apply_preset "$PRESET"
-    ok "使用預設組合 $PRESET（GPU0 顯存 $(gpu_mem_mib) MiB）"
+    ok "使用預設組合 $PRESET（$GPU_NAME，顯存 $GPU_MEM_MIB MiB）"
     SERVE_MODEL="$PRESET_MODEL"; SERVE_NAME="$PRESET_NAME"; SERVE_MAX_LEN="$PRESET_MAX_LEN"
     SERVE_GPU_UTIL="$PRESET_GPU_UTIL"; SERVE_TOOL_PARSER="$PRESET_TOOL_PARSER"; SERVE_EXTRA_ARGS="$PRESET_EXTRA"
 fi
@@ -137,7 +147,7 @@ if [ -n "$MODEL" ]; then
     SERVE_MAX_LEN="${MAX_LEN:-16384}"
     SERVE_GPU_UTIL="${SERVE_GPU_UTIL:-0.90}"
     SERVE_TOOL_PARSER="${TOOL_PARSER:-hermes}"
-    [ "$EXTRA_SET" = 1 ] || SERVE_EXTRA_ARGS="$BASE_EXTRA"
+    [ "$EXTRA_SET" = 1 ] || SERVE_EXTRA_ARGS="$(gpu_tune_extra "$BASE_EXTRA")"
 fi
 [ -z "$NAME" ]        || SERVE_NAME="$NAME"
 [ -z "$MAX_LEN" ]     || SERVE_MAX_LEN="$MAX_LEN"
@@ -164,11 +174,15 @@ elif python3 -c "import sys; sys.exit(0 if $SERVE_GPU_UTIL > $MAX_UTIL else 1)";
     warn "GPU 已被其他程式使用 ${MEM_USED} MiB / ${MEM_TOTAL} MiB，SERVE_GPU_UTIL 由 $SERVE_GPU_UTIL 調低為 $MAX_UTIL"
     SERVE_GPU_UTIL="$MAX_UTIL"
 fi
-# 沒有 CUDA Toolkit（nvcc）時，FlashInfer 會在暖機時現場編譯失敗（RTX 50 系列常見）→ 改用 Triton
-if [ -z "${SERVE_ATTN_BACKEND+x}" ]; then
-    if command -v nvcc >/dev/null 2>&1 || [ -x /usr/local/cuda/bin/nvcc ]; then SERVE_ATTN_BACKEND=""
-    else SERVE_ATTN_BACKEND="TRITON_ATTN"; fi
-fi
+# 注意力後端：auto = 每次啟動依 GPU 決定（run-vllm.sh）；舊版腳本自動寫入的空白 / TRITON_ATTN 一律改成 auto，
+# 否則 RTX 50 筆電上用的 Triton 會被帶到 H100 / H200（實測 H200 卡住、生成 0 token/s）
+case "${SERVE_ATTN_BACKEND-}" in
+    ""|TRITON_ATTN)
+        [ -z "${SERVE_ATTN_BACKEND-}" ] || warn "注意力後端由 TRITON_ATTN 改成 auto（依 GPU 自動選）"
+        SERVE_ATTN_BACKEND=auto ;;
+esac
+ATTN_NOW="$(auto_attn_backend)"
+ok "注意力後端：auto → ${ATTN_NOW:-FlashAttention（vLLM 自動選）}"
 SERVE_PORT="${PORT:-${SERVE_PORT:-8000}}"
 SERVE_HOST="${HOST:-${SERVE_HOST:-0.0.0.0}}"
 SERVE_API_KEY="${KEY:-${SERVE_API_KEY:-$(gen_key)}}"
@@ -192,7 +206,8 @@ SERVE_GPU_UTIL="$SERVE_GPU_UTIL"
 SERVE_TOOL_PARSER="$SERVE_TOOL_PARSER"
 # 其他 vllm serve 參數，例：--tensor-parallel-size 2（兩張 GPU）
 SERVE_EXTRA_ARGS="$(esc "$SERVE_EXTRA_ARGS")"
-# 注意力運算後端：空白 = vLLM 自動選；TRITON_ATTN = 不需要 CUDA Toolkit（沒有 nvcc 時使用）
+# 注意力運算後端：auto = 依 GPU 自動選（RTX 50 沒有 CUDA Toolkit 時用 TRITON_ATTN，其他交給 vLLM）；
+#   也可以指定 FLASH_ATTN / FLASHINFER / TRITON_ATTN；空白 = 完全交給 vLLM
 SERVE_ATTN_BACKEND="$SERVE_ATTN_BACKEND"
 
 SERVE_HOST="$SERVE_HOST"
@@ -227,6 +242,15 @@ args=(serve "$SERVE_MODEL"
       --gpu-memory-utilization "$SERVE_GPU_UTIL")
 if [ -n "${SERVE_TOOL_PARSER:-}" ]; then
     args+=(--enable-auto-tool-choice --tool-call-parser "$SERVE_TOOL_PARSER")
+fi
+if [ "${SERVE_ATTN_BACKEND:-}" = auto ]; then
+    # Blackwell（compute capability 10 以上，例如 RTX 50）沒有 nvcc → Triton；其他交給 vLLM
+    SERVE_ATTN_BACKEND=""
+    SMI="$(command -v nvidia-smi || echo /usr/lib/wsl/lib/nvidia-smi)"
+    CC_MAJOR="$("$SMI" --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1 | cut -d. -f1 || true)"
+    if [ "${CC_MAJOR:-0}" -ge 10 ] && ! command -v nvcc >/dev/null 2>&1 && [ ! -x /usr/local/cuda/bin/nvcc ]; then
+        SERVE_ATTN_BACKEND=TRITON_ATTN
+    fi
 fi
 if [ -n "${SERVE_ATTN_BACKEND:-}" ]; then
     args+=(--attention-backend "$SERVE_ATTN_BACKEND")

@@ -19,7 +19,7 @@
      8. 在這台 Windows 安裝 opencode 桌面版並連到本機 vLLM，最後印出給同學的連線資訊
 
  參數：
-     -Preset small|medium|large   模型組合（預設依顯存自動選；8GB 筆電會選 small）
+     -Preset small|laptop|quality|medium|large|xlarge   模型組合（預設依顯卡自動選；8GB 筆電會選 small）
      -Port N                      vLLM 埠號（預設 8000）
      -AllowFrom 來源清單          允許連線的來源，逗號分隔（預設 LocalSubnet＝只允許同網段）
                                   可填 LocalSubnet、Any、IP 或網段，例：LocalSubnet,10.8.0.0/16（加上學校 VPN 網段）
