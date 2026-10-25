@@ -494,6 +494,94 @@ for i, (ic, t, d) in enumerate([("👥", "給同學：網址 + 金鑰", "同學�
          [[(t, {"bold": True, "color": INK, "size": 14})], [(d, {"size": 12})]], space=1)
 
 # =============================================================================
+#  8c. 測試 vLLM：送一句話並計時
+# =============================================================================
+s = content_slide("02 主機安裝 · 測試（筆電與 Ubuntu 伺服器都適用）", "測試 vLLM：送一句話並計時",
+                  "裝完、換模型、重開機之後，先在主機上自己測一次，再請同學連。指令都在 Linux 裡執行："
+                  "筆電主機先輸入 wsl -d Ubuntu 進入 Ubuntu，Ubuntu 伺服器直接執行。"
+                  "健康檢查印出 ok 代表服務在跑；計時測試會真的請模型回一句話，金鑰從 vllm.env 讀，不用貼。"
+                  "正常 1 秒內回來；Couldn't connect 代表還在啟動或沒在跑；超過 10 秒或卡住，看下一頁的排查。"
+                  "bench 是完整測速，會測單人、多人同時與長文件，約數分鐘。")
+cw_ = Inches(6.55)
+code(s, MX, TOP, cw_, Inches(4.6), [
+    "# 筆電主機先進 Ubuntu（伺服器略過這行）",
+    ">wsl -d Ubuntu",
+    "",
+    "# 1. 健康檢查：印出 ok 就是服務在跑",
+    ">curl -sS -m 3 http://127.0.0.1:8000/health && echo ok",
+    "",
+    "# 2. 送一句話並計時（金鑰從 vllm.env 讀）",
+    ">source ~/vllm-server/vllm.env; time curl -sS \\",
+    ">  http://127.0.0.1:8000/v1/chat/completions \\",
+    ">  -H \"Authorization: Bearer $SERVE_API_KEY\" \\",
+    ">  -H \"Content-Type: application/json\" \\",
+    ">  -d \"{\\\"model\\\":\\\"$SERVE_NAME\\\",\\\"max_tokens\\\":50,",
+    ">  \\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"用一句話介紹台北\\\"}]}\"",
+    "",
+    "# 3. 完整測速（筆電：vllmctl.cmd bench）",
+    ">bash ~/local-llm/server/vllm/vllmctl.sh bench",
+], size=11)
+rx, rw = MX + cw_ + Inches(0.3), CW - cw_ - Inches(0.3)
+text(s, rx, TOP, rw, Inches(0.35), "實際畫面：H200 回一句話只要 0.2 秒", size=14, color=INK, bold=True)
+pic = screenshot(s, rx, TOP + Inches(0.42), rw, "vllm-test-curl.png")
+highlight(s, pic, 0.0, 0.31, 1.0, 0.16, "1")
+highlight(s, pic, 0.0, 0.745, 0.23, 0.07, "2")
+ty = pic.top + pic.height + Inches(0.25)
+table(s, rx, ty, rw, [
+    ["看到", "代表"],
+    ["① content 有中文回答", "模型正常回應"],
+    ["② real 1 秒以內", "速度正常（第一次可能 1~2 秒）"],
+    ["Couldn't connect to server", "還在啟動或沒在跑 → 看 logs"],
+    ["超過 10 秒、卡住不動", "看下一頁：很慢或卡住"],
+], [2.6, 3.0], size=12, rowh=0.4)
+
+# =============================================================================
+#  8d. 很慢或卡住：基本排查
+# =============================================================================
+s = content_slide("02 主機安裝 · 排查（實例：H200 每秒 0.2 token）", "很慢或卡住：基本排查指令",
+                  "照順序看：服務狀態與紀錄 → GPU 有沒有在動 → CPU 誰在忙 → 用 py-spy 看 vLLM 卡在哪一行 → 驅動有沒有記錄 GPU 錯誤。"
+                  "實例：H200 生成每秒只有 0.2 token，GPU 使用率 0%，連 systemd 都停不掉。py-spy 顯示停在 cudaMemcpyAsync，"
+                  "也就是在等 GPU 傳輸；dmesg 沒有 Xid、PCIe Gen5 x16 正常，重開機後 Initializing model 從 107 秒變 6 秒，恢復正常。"
+                  "GPU 傳輸測速：~/vllm-server/.venv/bin/python 跑 torch 把 256MB 搬到 GPU，"
+                  "正常一般記憶體 5~20 GB/s、鎖定記憶體 30~55 GB/s。重開後還是一樣，或 dmesg 有 Xid，就交給機房檢查 GPU。")
+cw_ = Inches(7.0)
+code(s, MX, TOP, cw_, Inches(4.45), [
+    "# 1. 服務狀態、最近紀錄（筆電：vllmctl.cmd status / logs）",
+    ">bash ~/local-llm/server/vllm/vllmctl.sh status",
+    ">journalctl -u vllm -n 40 --no-pager",
+    ">journalctl -u vllm -f          # 即時看，Ctrl+C 離開",
+    "",
+    "# 2. GPU 有沒有在動（顯存、使用率）",
+    ">nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv",
+    "",
+    "# 3. CPU 誰在忙（vLLM 都 0% = 在等東西，不是在算）",
+    ">ps aux --sort=-%cpu | head -8",
+    "",
+    "# 4. vLLM 卡在哪一行（py-spy 第一次要先裝）",
+    ">~/.local/bin/uv pip install --python ~/vllm-server/.venv/bin/python py-spy",
+    ">sudo ~/vllm-server/.venv/bin/py-spy dump --pid $(pgrep -f EngineCore)",
+    "",
+    "# 5. 驅動有沒有記錄 GPU 錯誤（有 Xid 就是 GPU 出錯）",
+    ">sudo dmesg -T | grep -iE \"xid|nvrm\" | tail -20",
+], size=10)
+rx, rw = MX + cw_ + Inches(0.3), CW - cw_ - Inches(0.3)
+table(s, rx, TOP, rw, [
+    ["看到", "怎麼辦"],
+    ["Couldn't connect、ECONNREFUSED", "還在啟動：journalctl -f 等 startup complete"],
+    ["紀錄有 Error / Traceback", "往上找第一個 Error 才是原因"],
+    ["顯存不足（OutOfMemory）", "set SERVE_MAX_LEN 調小，或換小一點的組合"],
+    ["很慢、GPU 0%、Running: 1 reqs", "引擎卡住 → 用 py-spy 看卡在哪"],
+    ["py-spy 停在 cudaMemcpyAsync", "在等 GPU 傳輸 → sudo reboot"],
+    ["dmesg 有 Xid、重開還是一樣", "GPU 或虛擬化平台問題 → 交給機房"],
+], [2.45, 2.4], size=11, rowh=0.62)
+box(s, MX, TOP + Inches(4.6), CW, Inches(0.5), fill=TINT, line=None)
+text(s, MX + Inches(0.25), TOP + Inches(4.6), CW - Inches(0.5), Inches(0.5),
+     [[("實例 H200：", {"bold": True, "color": INK}),
+       ("每秒 0.2 token、GPU 0% → py-spy 停在 cudaMemcpyAsync → dmesg 沒 Xid → 重開機，"
+        "Initializing model 107 秒 → 6 秒，恢復正常", {})]],
+     size=12, anchor=MSO_ANCHOR.MIDDLE, space=0)
+
+# =============================================================================
 #  9. 同學電腦安裝 opencode
 # =============================================================================
 s = content_slide("03 同學使用 opencode", "同學的電腦：雙擊 install-client.cmd",
@@ -563,6 +651,8 @@ text(s, MX + Inches(6.0), TOP + Inches(4.1), CW - Inches(6.0), Inches(0.5),
 #  9b-2. 實際畫面：install-client 依 servers.json 加入兩台
 # =============================================================================
 s = content_slide("03 同學使用 opencode · 實際畫面", "實際執行：servers.json 有兩台，依序加入",
+                  "安裝前可以先用瀏覽器開伺服器網址（結尾 /v1）測試：看到 Unauthorized 代表連得到，只是瀏覽器沒帶金鑰；"
+                  "轉圈圈或打不開才是連不到（IP 錯、沒開機、沒連 VPN）。"
                   "這是 servers.json 填了兩台伺服器時，雙擊 install-client.cmd 的實際畫面（右圖接在左圖後面）。"
                   "第一台實驗室 GPT：先測試連線並列出模型，接著安裝桌面版、寫入設定、裝共用規則，每一步都是 [OK]。"
                   "第二台國網的金鑰沒填對，出現 401 未經授權：這台會被跳過，其他照常安裝，修好金鑰後再雙擊一次就會補加入，"
@@ -575,11 +665,20 @@ highlight(s, left, 0.0, 0.15, 0.44, 0.095, "1")
 highlight(s, right, 0.0, 0.445, 0.83, 0.125, "2")
 highlight(s, right, 0.0, 0.595, 1.0, 0.175, "3")
 cy = TOP + max(left.height, right.height) + Inches(0.25)
-cw = (CW - Inches(0.5)) / 3
+# 左下：安裝前先用瀏覽器測連線
+bw = Inches(2.45)
+browser = screenshot(s, MX, cy, bw, "browser-unauthorized.png")
+highlight(s, browser, 0.0, 0.66, 0.43, 0.2, "0")
+bx = MX + bw + Inches(0.2)
+text(s, bx, cy, Inches(2.0), Inches(1.0),
+     [[("安裝前：瀏覽器測試", {"bold": True, "color": INK, "size": 14})],
+      [("開伺服器網址，看到 Unauthorized 就是連得到（只是沒帶金鑰）", {"size": 12})]], space=2, line=1.1)
+x0 = bx + Inches(2.2)
+cw = (MX + CW - x0 - Inches(0.4)) / 3
 for i, (n, t, d) in enumerate([("1", "測試連線", "列出伺服器上的模型，[OK] 才往下裝"),
                                ("2", "401 未經授權", "金鑰沒填或填錯：先跳過，修好再雙擊"),
                                ("3", "文件工具與 /指令", "labdoc、/slides、/pdf2word 等一起裝好")]):
-    x = MX + (cw + Inches(0.25)) * i
+    x = x0 + (cw + Inches(0.2)) * i
     badge(s, x, cy + Inches(0.02), Inches(0.34), n, fill=ORANGE, size=12)
     text(s, x + Inches(0.48), cy, cw - Inches(0.5), Inches(0.9),
          [[(t, {"bold": True, "color": INK, "size": 14})], [(d, {"size": 12})]], space=2, line=1.1)
