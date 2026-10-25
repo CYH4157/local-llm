@@ -18,6 +18,7 @@
      -Models       只加入這些模型，逗號分隔（伺服器模型很多時用，例如國網 API）
      -Context      伺服器沒回報上下文長度時使用的值（預設 16384）
      -Label        opencode 裡顯示的 provider 名稱（預設「vLLM (Name)」）
+     -SkipTools    不安裝文件工具 labdoc 與 /指令（/slides、/pdf2word、/official…，約 450MB）
 
  也可以連其他 OpenAI 相容的 API，例如國網：寫進 servers.json（範本已有 nchc 一筆），或用 -Url / -Name / -Models 指定
 
@@ -34,7 +35,8 @@ param(
     [string]$Models,
     [int]$Context = 16384,
     [string]$Label,
-    [switch]$FromList     # 內部用：由 servers.json 逐台呼叫時，不印最後的使用說明
+    [switch]$SkipTools,
+    [switch]$FromList     # 內部用：由 servers.json 逐台呼叫時，不印最後的使用說明、不裝文件工具
 )
 $ErrorActionPreference = "Stop"
 function Step($m) { Write-Host "`n==== $m ====" -ForegroundColor Cyan }
@@ -50,6 +52,88 @@ function Show-Usage {
     if (Get-Command opencode -ErrorAction SilentlyContinue) {
         Write-Host "  終端機版：開新的終端機 → cd 到專案資料夾 → 輸入 opencode（裡面輸入 /models 切換模型）"
     }
+    if (Test-Path (Join-Path $env:USERPROFILE ".config\opencode\labdoc\bin\labdoc.exe")) {
+        Write-Host "  文件與行政：在 opencode 輸入 / 會列出 /slides 做投影片、/pdf2word、/official 簽呈公文、/expense 核銷…"
+    }
+}
+
+# --- 文件工具 labdoc 與 /指令（每台電腦裝一次，跟連哪台伺服器無關） -------------
+# labdoc 裝在獨立的 Python venv，不影響使用者自己的 Python；
+# 用 pip 產生的 labdoc.exe 啟動（不能用 .cmd：經過 cmd.exe 時 PowerShell 5.1 會把中文輸出轉成 Big5，opencode 讀到亂碼）
+function Find-Python {
+    foreach ($c in @(@("py", "-3"), @("python"), @("python3"))) {
+        if (-not (Get-Command $c[0] -ErrorAction SilentlyContinue)) { continue }
+        $args_ = @($c | Select-Object -Skip 1) + @("-c", "import sys, venv; print(sys.executable if sys.version_info >= (3, 9) else '')")
+        # Microsoft Store 的 python.exe 假捷徑執行會失敗，自然會被跳過
+        $exe = try { "$(& $c[0] @args_ 2>$null)".Trim() } catch { "" }
+        if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
+    }
+    return $null
+}
+
+function Install-LabTools {
+    Step "5. 安裝文件工具 labdoc 與 /指令"
+    $cfgDir  = Join-Path $env:USERPROFILE ".config\opencode"
+    $src     = Join-Path $PSScriptRoot "labdoc"
+    $toolDir = Join-Path $cfgDir "labdoc"
+    $venvPy  = Join-Path $toolDir "venv\Scripts\python.exe"
+    $binDir  = Join-Path $toolDir "bin"
+    if (-not (Test-Path (Join-Path $src "labdoc.py"))) { Warn "找不到 $src，略過"; return }
+    try {
+        if (-not (Test-Path $venvPy)) {
+            $py = Find-Python
+            if ($py) {
+                Write-Host "  建立 Python 環境（使用 $py）"
+                & $py -m venv (Join-Path $toolDir "venv")
+            } else {
+                # 沒有 Python：用 uv 下載一份獨立的 Python（裝在使用者目錄，不需系統管理員）
+                if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+                    Write-Host "  這台沒有 Python，安裝 uv 來下載 Python"
+                    $env:UV_NO_MODIFY_PATH = "1"
+                    Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
+                    $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+                }
+                uv venv --seed --python 3.12 (Join-Path $toolDir "venv")
+            }
+            if (-not (Test-Path $venvPy)) { throw "建立 Python 環境失敗" }
+        }
+        # 從暫存複本安裝，避免 pip 在 repo 裡留下 build/ 和 egg-info
+        $tmp = Join-Path $env:TEMP "labdoc-src"
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+        Copy-Item $src $tmp -Recurse
+        Write-Host "  安裝 Python 套件（第一次約 450MB，請稍候）…"
+        & $venvPy -m pip install --disable-pip-version-check -q --upgrade $tmp
+        $pipOk = ($LASTEXITCODE -eq 0)
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+        if (-not $pipOk) { throw "pip 安裝失敗（看上面的錯誤；常見原因是網路被擋）" }
+        New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+        Get-Process labdoc -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Copy-Item (Join-Path $toolDir "venv\Scripts\labdoc.exe") (Join-Path $binDir "labdoc.exe") -Force
+        & (Join-Path $binDir "labdoc.exe") -h *> $null
+        if ($LASTEXITCODE -ne 0) { throw "labdoc 無法執行" }
+        # 加進使用者 PATH，opencode 才能直接下 labdoc（重開 opencode 後生效）
+        $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+        if (-not (@("$userPath" -split ';') -contains $binDir)) {
+            [Environment]::SetEnvironmentVariable("Path", (@($binDir) + @("$userPath" -split ';' | Where-Object { $_ })) -join ';', "User")
+        }
+        $env:Path = "$binDir;$env:Path"
+        Ok "labdoc：$binDir\labdoc.exe（讀 PDF/Word/PPT/Excel、PDF 轉 Word、Markdown 轉 Office、PDF 合併拆頁）"
+    } catch {
+        Warn "文件工具沒有裝好：$($_.Exception.Message)。opencode 照樣能用，只是 /slides 等指令無法產生檔案；修好後重跑本腳本即可"
+    }
+
+    # /指令：放在全域 command 資料夾，每個專案都能用；使用者自己改過（拿掉標記）的不覆蓋
+    $cmdDir = Join-Path $cfgDir "command"
+    New-Item -ItemType Directory -Force -Path $cmdDir | Out-Null
+    $installed = @(); $kept = @()
+    foreach ($f in Get-ChildItem (Join-Path $PSScriptRoot "commands") -Filter *.md -ErrorAction SilentlyContinue) {
+        $dst = Join-Path $cmdDir $f.Name
+        if ((Test-Path $dst) -and -not (Select-String -Path $dst -Pattern "lab-opencode-command" -Quiet)) { $kept += $f.BaseName; continue }
+        [IO.File]::WriteAllBytes($dst, [IO.File]::ReadAllBytes($f.FullName))
+        $installed += "/$($f.BaseName)"
+    }
+    if ($installed) { Ok "已安裝指令：$($installed -join ' ')" }
+    if ($kept) { Warn "已經有同名的自訂指令，不覆蓋：$($kept -join ', ')" }
 }
 
 # --- 0. servers.json：管理者預先填好的伺服器清單 -----------------------------
@@ -78,6 +162,7 @@ if (-not $Url -and -not $FromList -and (Test-Path $listPath)) {
     }
     if ($done)   { Ok "已加入：$($done -join ', ')" }
     if ($failed) { Warn "沒加入：$($failed -join ', ')（看上面的錯誤訊息；修好後再雙擊一次即可）" }
+    if ($done -and -not $SkipTools) { Install-LabTools }
     if ($done) { Show-Usage }
     exit $(if ($failed) { 1 } else { 0 })
 }
@@ -288,5 +373,6 @@ if (-not (Test-Path $rulesSrc)) {
     Ok "已安裝：回答用繁體中文、相對路徑、查資料附來源與日期、不捏造文獻"
 }
 
+if (-not $FromList -and -not $SkipTools) { Install-LabTools }
 if (-not $FromList) { Show-Usage }
 exit 0   # 明確回傳成功：由 servers.json 逐台呼叫時靠 $LASTEXITCODE 判斷

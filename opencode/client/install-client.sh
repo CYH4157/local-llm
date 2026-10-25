@@ -14,6 +14,7 @@
 #      --models A,B  只加入這些模型，逗號分隔（伺服器模型很多時用，例如國網 API）
 #      --context N   伺服器沒回報上下文長度時使用的值（預設 16384）
 #      --label TEXT  opencode 裡顯示的 provider 名稱（預設「vLLM (name)」）
+#      --skip-tools  不安裝文件工具 labdoc 與 /指令（/slides、/pdf2word、/official…，約 450MB）
 #
 #  可重複執行：會「合併」進 ~/.config/opencode/opencode.json，不會刪掉其他 provider。
 #  金鑰另存在 ~/.config/opencode/keys/<name>.key（權限 600），設定檔裡不放明碼。
@@ -26,7 +27,7 @@ ok()   { printf '  \033[32m[OK]\033[0m %s\n' "$1"; }
 warn() { printf '  \033[33m[!]\033[0m  %s\n' "$1"; }
 die()  { printf '  \033[31m[X]\033[0m  %s\n' "$1" >&2; exit 1; }
 
-URL="" KEY="" PNAME="vllm" MAKE_DEFAULT=0 ONLY="" CTX=16384 LABEL=""
+URL="" KEY="" PNAME="vllm" MAKE_DEFAULT=0 ONLY="" CTX=16384 LABEL="" SKIP_TOOLS=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --url)     URL="${2%/}"; shift 2 ;;
@@ -36,7 +37,8 @@ while [ $# -gt 0 ]; do
         --models)  ONLY="$2"; shift 2 ;;
         --context) CTX="$2"; shift 2 ;;
         --label)   LABEL="$2"; shift 2 ;;
-        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+        --skip-tools) SKIP_TOOLS=1; shift ;;
+        -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
         *) die "不認得的參數：$1" ;;
     esac
 done
@@ -50,6 +52,8 @@ case "$URL" in */v1) ;; *) URL="$URL/v1" ;; esac
 step "1. 必要套件"
 need=()
 for c in curl jq python3; do command -v "$c" >/dev/null 2>&1 || need+=("$c"); done
+# labdoc 要用 venv（Ubuntu 的 python3 預設沒有 venv 模組）
+if [ "$SKIP_TOOLS" = 0 ] && ! python3 -c 'import ensurepip, venv' >/dev/null 2>&1; then need+=(python3-venv); fi
 if [ ${#need[@]} -gt 0 ]; then sudo apt-get update -y && sudo apt-get install -y "${need[@]}"; fi
 ok "完成"
 
@@ -144,7 +148,45 @@ else
     ok "已安裝：回答用繁體中文、相對路徑、查資料附來源與日期、不捏造文獻"
 fi
 
+# --- 6. 文件工具 labdoc 與 /指令 ---------------------------------------------
+if [ "$SKIP_TOOLS" = 1 ]; then
+    warn "略過文件工具（--skip-tools）"
+else
+    step "6. 安裝文件工具 labdoc 與 /指令"
+    TOOL_DIR="$CFG_DIR/labdoc"
+    if [ ! -f "$HERE/labdoc/labdoc.py" ]; then
+        warn "找不到 $HERE/labdoc，略過"
+    elif { [ -x "$TOOL_DIR/venv/bin/python" ] || python3 -m venv "$TOOL_DIR/venv"; } &&
+         TMP_SRC="$(mktemp -d)" && cp -r "$HERE/labdoc/." "$TMP_SRC/" &&
+         echo "  安裝 Python 套件（第一次約 450MB，請稍候）…" &&
+         "$TOOL_DIR/venv/bin/python" -m pip install --disable-pip-version-check -q --upgrade "$TMP_SRC"; then
+        rm -rf "$TMP_SRC"
+        # 放到 ~/.local/bin（Ubuntu 登入時會自動加進 PATH）
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$TOOL_DIR/venv/bin/labdoc" "$HOME/.local/bin/labdoc"
+        if ! grep -q '.local/bin' "$HOME/.bashrc" 2>/dev/null; then
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+        fi
+        ok "labdoc：$HOME/.local/bin/labdoc（轉 PDF 需要 LibreOffice：sudo apt install libreoffice）"
+    else
+        rm -rf "${TMP_SRC:-}"
+        warn "文件工具沒有裝好（看上面的錯誤）；opencode 照樣能用，修好後重跑本腳本即可"
+    fi
+    # /指令：使用者自己改過（拿掉 lab-opencode-command 標記）的不覆蓋
+    mkdir -p "$CFG_DIR/command"
+    installed="" kept=""
+    for f in "$HERE"/commands/*.md; do
+        [ -f "$f" ] || continue
+        dst="$CFG_DIR/command/$(basename "$f")"
+        if [ -f "$dst" ] && ! grep -q "lab-opencode-command" "$dst"; then kept="$kept $(basename "$f" .md)"; continue; fi
+        tr -d '\r' < "$f" > "$dst"
+        installed="$installed /$(basename "$f" .md)"
+    done
+    [ -z "$installed" ] || ok "已安裝指令：$installed"
+    [ -z "$kept" ] || warn "已經有同名的自訂指令，不覆蓋：$kept"
+fi
+
 step "opencode 完成"
 echo "  開新終端機（或 source ~/.bashrc），到專案資料夾執行： opencode"
-echo "  在 opencode 裡輸入 /models 可切換 provider / 模型"
+echo "  在 opencode 裡輸入 /models 可切換 provider / 模型；輸入 / 會列出 /slides、/pdf2word、/official 等文件與行政指令"
 echo "  設定檔：$CFG_DIR/opencode.json（舊版備份在 opencode.json.bak）"

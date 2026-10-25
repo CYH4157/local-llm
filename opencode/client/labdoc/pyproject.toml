@@ -1,0 +1,25 @@
+# labdoc 文件工具：install-client 用 pip 裝進 ~/.config/opencode/labdoc/venv，
+# 產生的 labdoc.exe（Linux 是 labdoc）再放到 PATH 上，opencode 才能直接下 labdoc 指令
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "labdoc"
+version = "1.0.0"
+requires-python = ">=3.9"
+dependencies = [
+    "python-docx>=1.1",
+    "python-pptx>=1.0",
+    "openpyxl>=3.1",
+    "pymupdf>=1.24",
+    "pdf2docx>=0.5.8",
+    # 簡體字、大陸用語 → 台灣繁體（labdoc tw）
+    "opencc-python-reimplemented>=0.1.7",
+]
+
+[project.scripts]
+labdoc = "labdoc:main"
+
+[tool.setuptools]
+py-modules = ["labdoc"]

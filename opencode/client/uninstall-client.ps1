@@ -3,7 +3,8 @@
  uninstall-client.ps1 — 移除 install-client 裝的東西（Windows）
 
  最簡單：雙擊 uninstall-client.cmd。
-     會移除：opencode 設定裡的實驗室 provider（預設 laptop）、實驗室共用規則 AGENTS.md、opencode 程式
+     會移除：opencode 設定裡的實驗室 provider（預設 laptop）、實驗室共用規則 AGENTS.md、
+             文件工具 labdoc 與實驗室的 /指令、opencode 程式
      不會動：你自己加的其他 provider / 設定、Scoop 本身（可能裝了其他軟體）
 
  參數：
@@ -55,7 +56,8 @@ if (-not (Test-Path $cfgPath)) {
                 if ($cfg.PSObject.Properties[$p] -and "$($cfg.$p)" -like "$n/*") { $cfg.PSObject.Properties.Remove($p) }
             }
         }
-        if ($cfg.PSObject.Properties['provider']) { $providersLeft = @($cfg.provider.PSObject.Properties.Name) }
+        # 用 ForEach-Object 取名稱：provider 已經空了時 .Properties.Name 會是 $null，@($null) 會被當成還剩 1 台
+        if ($cfg.PSObject.Properties['provider']) { $providersLeft = @($cfg.provider.PSObject.Properties | ForEach-Object { $_.Name }) }
         $left = @($cfg.PSObject.Properties | Where-Object { $_.Name -ne '$schema' -and
                   -not ($_.Name -eq 'provider' -and @($_.Value.PSObject.Properties).Count -eq 0) })
         if ($left.Count -eq 0) {
@@ -81,6 +83,34 @@ if ($providersLeft.Count -gt 0) {
     Ok "AGENTS.md 是你自己的版本，保留"
 } else {
     Ok "沒有安裝，略過"
+}
+
+# --- 2b. 文件工具 labdoc 與 /指令（跟共用規則一樣：還有其他伺服器就保留） --------
+Step "2b. 移除文件工具 labdoc 與 /指令"
+$toolDir = Join-Path $cfgDir "labdoc"
+$binDir  = Join-Path $toolDir "bin"
+$cmdDir  = Join-Path $cfgDir "command"
+if ($providersLeft.Count -gt 0) {
+    Ok "還有其他伺服器（$($providersLeft -join ', ')），保留文件工具與 /指令"
+} else {
+    if (Test-Path $toolDir) {
+        Get-Process labdoc -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Remove-Item $toolDir -Recurse -Force
+        Ok "已刪除 $toolDir"
+    } else {
+        Ok "沒有安裝 labdoc，略過"
+    }
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if (@("$userPath" -split ';') -contains $binDir) {
+        [Environment]::SetEnvironmentVariable("Path", (@("$userPath" -split ';') | Where-Object { $_ -and $_ -ne $binDir }) -join ';', "User")
+        Ok "已從使用者 PATH 移除 $binDir"
+    }
+    # 只刪實驗室裝的指令（有 lab-opencode-command 標記），自己寫的保留
+    $removedCmds = @(Get-ChildItem $cmdDir -Filter *.md -ErrorAction SilentlyContinue |
+        Where-Object { Select-String -Path $_.FullName -Pattern "lab-opencode-command" -Quiet })
+    $removedCmds | Remove-Item -Force
+    if ($removedCmds) { Ok "已刪除指令：$(($removedCmds | ForEach-Object { "/$($_.BaseName)" }) -join ' ')" }
+    if ((Test-Path $cmdDir) -and -not (Get-ChildItem $cmdDir -Force)) { Remove-Item $cmdDir -Force }
 }
 if ((Test-Path $cfgDir) -and -not (Get-ChildItem $cfgDir -Force | Where-Object { $_.Name -notlike "*.uninstall-bak" })) {
     Ok "設定資料夾只剩備份檔：$cfgDir（確認不需要後可自行刪除）"

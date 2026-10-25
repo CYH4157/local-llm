@@ -3,6 +3,7 @@
 一台 **Windows 筆電**用 WSL2 跑 [vLLM](https://github.com/vllm-project/vllm)，實驗室成員可以：
 
 - 用 **[opencode](https://github.com/anomalyco/opencode)** 寫程式、查資料、寫作業（每台電腦都能裝，不需要顯卡）
+- 在 opencode 用 `/slides`、`/pdf2word`、`/official`、`/expense` 等指令做投影片、PDF 轉 Word、寫簽呈公文、整理核銷明細（[使用教學 5.5](opencode/doc/使用教學.md#55-文件與行政指令做投影片pdf-轉-word簽呈)）
 - 在 **Discord** 問答，並產生 **PowerPoint / Word / Excel** 草稿（研究計畫、投影片、課堂報告）
 
 模型、程式碼與對話都留在實驗室，不經過雲端 API。
@@ -41,7 +42,7 @@ local-llm/
 │  ├─ wsl2/                Windows 主機：雙擊 setup-host.cmd 安裝、vllmctl.cmd 管理、funnel.cmd 校外連線
 │  └─ vllm/                Linux 端的 vLLM 腳本（WSL2 或 Ubuntu 主機直接執行 setup-vllm.sh、vllmctl.sh）
 ├─ opencode/               寫程式、查資料用的 opencode
-│  ├─ client/              同學的電腦：雙擊 install-client.cmd 安裝
+│  ├─ client/              同學的電腦：雙擊 install-client.cmd 安裝（含文件工具 labdoc 與 /指令）
 │  ├─ servers.example.json 伺服器清單範本（管理者複製成 servers.json、填好金鑰再發給同學）
 │  └─ doc/                 說明文件（使用教學.md）
 ├─ discord/                Discord bot（問答、產生 PPT / Word / Excel）

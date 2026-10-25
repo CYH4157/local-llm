@@ -5,6 +5,7 @@
 #    bash uninstall-client.sh [--name laptop] [--keep-program]
 #
 #  會移除：opencode 設定裡的 provider（預設 laptop）與它的金鑰檔、實驗室共用規則 AGENTS.md、
+#          文件工具 labdoc（~/.config/opencode/labdoc）與實驗室的 /指令、
 #          ~/.opencode（opencode 程式）與 ~/.bashrc 裡加入的 PATH
 #  不會動：你自己加的其他 provider / 設定、apt 套件
 # =============================================================================
@@ -50,6 +51,17 @@ rmdir "$CFG_DIR/keys" 2>/dev/null || true
 if [ -f "$CFG_DIR/AGENTS.md" ] && grep -q "lab-opencode-rules" "$CFG_DIR/AGENTS.md"; then
     rm -f "$CFG_DIR/AGENTS.md"; ok "已刪除實驗室共用規則 AGENTS.md"
 fi
+
+if [ -d "$CFG_DIR/labdoc" ]; then rm -rf "$CFG_DIR/labdoc"; ok "已刪除文件工具 labdoc"; fi
+if [ -L "$HOME/.local/bin/labdoc" ]; then rm -f "$HOME/.local/bin/labdoc"; fi
+# 只刪實驗室裝的指令（有 lab-opencode-command 標記），自己寫的保留
+removed=""
+for f in "$CFG_DIR"/command/*.md; do
+    [ -f "$f" ] && grep -q "lab-opencode-command" "$f" || continue
+    rm -f "$f"; removed="$removed /$(basename "$f" .md)"
+done
+[ -z "$removed" ] || ok "已刪除指令：$removed"
+rmdir "$CFG_DIR/command" 2>/dev/null || true
 
 if [ "$KEEP_PROGRAM" = 0 ]; then
     if [ -d "$HOME/.opencode" ]; then rm -rf "$HOME/.opencode"; ok "已刪除 ~/.opencode（opencode 程式）"; fi
