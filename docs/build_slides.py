@@ -840,6 +840,124 @@ text(s, rx + Inches(0.3), TOP + Inches(2.97), rw - Inches(0.6), Inches(1.0),
       [("只放 .env；不要截圖、貼 Notion 或 Discord。外洩就到 Bot 頁 Reset Token", {"size": 13})]],
      space=4, line=1.1)
 
+
+def captions(s, y, items, x=MX, w=CW):
+    """截圖下方的編號說明列：[(編號, 標題, 說明), ...]"""
+    cw = (w - Inches(0.25) * (len(items) - 1)) / len(items)
+    for i, (n, t, d) in enumerate(items):
+        cx = x + (cw + Inches(0.25)) * i
+        badge(s, cx, y + Inches(0.02), Inches(0.34), n, fill=ORANGE, size=12)
+        text(s, cx + Inches(0.48), y, cw - Inches(0.5), Inches(1.0),
+             [[(t, {"bold": True, "color": INK, "size": 14})], [(d, {"size": 12})]], space=2, line=1.1)
+
+
+# =============================================================================
+#  13a. 實際畫面：建立 Application、拿 token
+# =============================================================================
+s = content_slide("04 Discord bot · 管理者 · 實際畫面", "建立 bot：新建應用程式，到「機器人」頁拿 token",
+                  "到 discord.com/developers/applications 按「新建應用程式」，名稱取好認的，例如 LabGPT-H200。"
+                  "每台要跑 bot 的主機各建一個：同一個 token 同時在兩台跑，每則訊息會被回兩次。"
+                  "建好後左邊選「機器人」，按「重設權杖」再按「複製」。token 只會顯示這一次，"
+                  "馬上貼到 deploy.sh --token 或 .env；之後忘了就再重設一次，舊的會立刻失效。"
+                  "這個 token 是 Discord 的，不是 vLLM 的 sk-vllm- 金鑰，vLLM 金鑰 bot 會自動讀。")
+pw = (CW - Inches(0.3)) / 2
+left = screenshot(s, MX, TOP, pw, "discord-1-apps.png")
+right = screenshot(s, MX + pw + Inches(0.3), TOP, pw, "discord-2-token.png")
+highlight(s, left, 0.855, 0.2, 0.125, 0.075, "1")
+highlight(s, right, 0.008, 0.395, 0.125, 0.048, "2")
+highlight(s, right, 0.16, 0.785, 0.45, 0.2, "3")
+captions(s, TOP + max(left.height, right.height) + Inches(0.3), [
+    ("1", "新建應用程式", "名稱例如 LabGPT-H200；每台主機各建一個"),
+    ("2", "左邊選「機器人」", "token 和下一頁的開關都在這一頁"),
+    ("3", "重設權杖 → 複製", "只顯示一次；不是 vLLM 的 sk-vllm- 金鑰"),
+])
+
+# =============================================================================
+#  13b. 實際畫面：機器人頁的開關
+# =============================================================================
+s = content_slide("04 Discord bot · 管理者 · 實際畫面", "機器人頁的開關：圖中是改之前的狀態",
+                  "這是剛建好 bot 時的預設狀態，三個地方要改。公開機器人要關，不然邀請連結外流時別人也能把 bot 拉進他們的伺服器。"
+                  "Presence 和 Server Members 程式沒用到，關掉。Message Content 一定要開：圖中沒開，"
+                  "bot 啟動時就會出現 PrivilegedIntentsRequired 而一直重啟，Discord 上看到 bot 是離線。"
+                  "改完要按畫面下方跳出來的「儲存變更」。改開關不用重設 token；存好後 bot 會在 10 秒內自動重試連上。")
+pw = Inches(7.7)
+pic = screenshot(s, MX, TOP, pw, "discord-3-intents.png")
+highlight(s, pic, 0.16, 0.265, 0.83, 0.072, "1")
+highlight(s, pic, 0.16, 0.625, 0.83, 0.22, "2")
+highlight(s, pic, 0.16, 0.882, 0.83, 0.09, "3")
+rx, rw = MX + pw + Inches(0.3), CW - pw - Inches(0.3)
+for i, (n, t, d, col) in enumerate([
+        ("1", "公開機器人 → 關", "圖中開著：邀請連結外流，別人也能把 bot 拉走，用實驗室的顯卡", INK),
+        ("2", "Presence、Server Members → 關", "程式沒用到，少收一類事件也少一份個資", INK),
+        ("3", "Message Content → 開", "圖中沒開：bot 起不來（PrivilegedIntentsRequired）", RED)]):
+    y = TOP + Inches(1.05) * i
+    box(s, rx, y, rw, Inches(0.92))
+    badge(s, rx + Inches(0.15), y + Inches(0.15), Inches(0.34), n, fill=ORANGE, size=12)
+    text(s, rx + Inches(0.62), y + Inches(0.1), rw - Inches(0.75), Inches(0.8),
+         [[(t, {"bold": True, "color": col, "size": 14})], [(d, {"size": 11})]], space=2, line=1.05)
+box(s, rx, TOP + Inches(3.2), rw, Inches(0.85), fill=TINT, line=None)
+text(s, rx + Inches(0.2), TOP + Inches(3.2), rw - Inches(0.4), Inches(0.85),
+     [[("改完按「儲存變更」", {"bold": True, "color": INK, "size": 14})],
+      [("不用重設 token，bot 10 秒內會自動重試", {"size": 12})]], space=2, anchor=MSO_ANCHOR.MIDDLE)
+
+# =============================================================================
+#  13c. 實際畫面：OAuth2 產生邀請網址、授權加入伺服器
+# =============================================================================
+s = content_slide("04 Discord bot · 管理者 · 實際畫面", "OAuth2：產生邀請網址，把 bot 加進伺服器",
+                  "左邊選 OAuth2，往下到「OAuth2 URL 產生器」：範圍只勾 bot，下方的機器人權限勾檢視頻道、傳送訊息、"
+                  "附加檔案、讀取訊息歷史記錄這四個（圖中已捲到下面，傳送訊息在上方）。重新導向不用填。"
+                  "整合類型選公會安裝，複製最下面產生的網址，用瀏覽器打開，選要加入的伺服器、按繼續再按授權。"
+                  "要有那個伺服器的「管理伺服器」權限才看得到它。機器人頁也有一個權限計算器，那個不會產生邀請網址，用這一頁就好。")
+lw = Inches(6.2)
+left = screenshot(s, MX, TOP, lw, "discord-4-oauth2-url.png")
+right = screenshot(s, MX + lw + Inches(0.3), TOP, CW - lw - Inches(0.3), "discord-5-authorize.png")
+highlight(s, left, 0.185, 0.41, 0.075, 0.05, "1")
+highlight(s, left, 0.448, 0.255, 0.12, 0.09, "1")
+highlight(s, left, 0.175, 0.905, 0.81, 0.075, "2")
+highlight(s, right, 0.49, 0.75, 0.24, 0.06, "3")
+highlight(s, right, 0.61, 0.885, 0.165, 0.065, "4")
+captions(s, TOP + max(left.height, right.height) + Inches(0.3), [
+    ("1", "範圍 bot ＋ 四個權限", "檢視頻道、傳送訊息、附加檔案、讀取訊息歷史記錄"),
+    ("2", "複製產生的 URL", "用瀏覽器打開；重新導向不用填"),
+    ("3", "選要加入的伺服器", "要有「管理伺服器」權限才看得到"),
+    ("4", "繼續 → 授權", "bot 出現在成員列表（還沒啟動前是離線）"),
+])
+
+# =============================================================================
+#  13d. 實際畫面：Ubuntu 伺服器部署 bot
+# =============================================================================
+s = content_slide("04 Discord bot · 管理者 · 實際畫面", "在伺服器部署 bot：deploy.sh 一行完成（Ubuntu / H200）",
+                  "bot 跟 vLLM 跑在同一台，金鑰自動讀 ~/vllm-server/vllm.env，不用貼。deploy.sh 會確認 vLLM、建 Python 環境、"
+                  "產生 .env，最後註冊成 systemd 服務 discord-bot：開機自動啟動、掛掉 10 秒後自動重啟。"
+                  "第 4 步要輸入 Ubuntu 密碼（sudo）。看到「[已上線]」就完成，在 Discord 輸入 !help 試試看。"
+                  "Windows 筆電改用 discord\\client\\deploy.ps1（vLLM 在 WSL），步驟見 discord-bot.md。")
+iw = Inches(3.25)
+pic = screenshot(s, MX + CW - iw, TOP - Inches(0.2), iw, "discord-6-deploy.png")
+highlight(s, pic, 0.0, 0.355, 1.0, 0.03, "1")
+highlight(s, pic, 0.0, 0.868, 1.0, 0.045, "2")
+highlight(s, pic, 0.0, 0.93, 1.0, 0.065, "3")
+lw = CW - iw - Inches(0.3)
+code(s, MX, TOP, lw, Inches(3.05), [
+    "# 1. 拉最新程式，部署（token 是 Discord 的，不是 sk-vllm-）",
+    ">cd ~/local-llm && git pull",
+    ">bash discord/client/deploy.sh --token <Discord_bot_token>",
+    "",
+    "# 2. 看紀錄：出現 [已上線] 就完成（Ctrl+C 離開）",
+    ">journalctl -u discord-bot -f",
+    "",
+    "# 日常：狀態 / 改完 .env 重啟 / 移除",
+    ">sudo systemctl status discord-bot",
+    ">sudo systemctl restart discord-bot",
+    ">bash discord/client/deploy.sh --uninstall",
+], size=11)
+table(s, MX, TOP + Inches(3.2), lw, [
+    ["紀錄出現", "處理"],
+    ["① vLLM 正常 ② 已建立 .env ③ 註冊服務", "deploy.sh 三個重點步驟（右圖）"],
+    ["PrivilegedIntentsRequired", "開 Message Content Intent 並儲存，不用重設 token"],
+    ["LoginFailure", "token 貼錯：重新複製填進 .env，再 restart"],
+    ["已上線但回很慢", "vLLM 卡住了：用「很慢或卡住」那頁的指令排查"],
+], [3.0, 4.6], size=11, rowh=0.37)
+
 # =============================================================================
 #  14. Discord 指令
 # =============================================================================
