@@ -4,6 +4,8 @@ build_slides.py — 產生「實驗室本地 LLM 使用教學」投影片（docs
 修改內容後重新產生（在 repo 根目錄；借用 Discord bot 的 Python 環境，裡面有 python-pptx，
 先跑過 discord\\client\\deploy.ps1）：
     discord\\client\\.venv\\Scripts\\python.exe docs\\build_slides.py
+
+實際畫面的截圖放在 docs/img/，換截圖時直接覆蓋同名檔案再重新產生。
 """
 
 import os
@@ -17,6 +19,7 @@ from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches, Pt
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "實驗室本地LLM使用教學.pptx")
+IMG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "img")
 
 # --- 配色（沿用舊版投影片）與字型 -----------------------------------------
 NAVY   = RGBColor(0x0F, 0x1B, 0x2D)   # 深色頁背景
@@ -133,6 +136,28 @@ def arrow(slide, x1, y1, x2, y2, color=MUTED, width=1.5, dash=False):
     tail = etree.SubElement(ln, qn("a:tailEnd"))
     tail.set("type", "triangle")
     return c
+
+
+def screenshot(slide, x, y, w, name):
+    """docs/img/ 裡的截圖，寬度固定、高度照比例，加細框"""
+    pic = slide.shapes.add_picture(os.path.join(IMG, name), int(x), int(y), width=int(w))
+    pic.line.color.rgb = BORDER
+    pic.line.width = Pt(0.75)
+    return pic
+
+
+def highlight(slide, pic, fx, fy, fw, fh, label):
+    """在截圖上框出一塊（fx…fh 是佔圖片寬高的比例），右上角放編號"""
+    x, y = pic.left + int(pic.width * fx), pic.top + int(pic.height * fy)
+    w, h = int(pic.width * fw), int(pic.height * fh)
+    s = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, y, w, h)
+    s.fill.background()
+    s.line.color.rgb = ORANGE
+    s.line.width = Pt(2.25)
+    s.shadow.inherit = False
+    s.adjustments[0] = 0.08
+    d = Inches(0.34)
+    badge(slide, x + w - d // 2, y - d // 2, d, label, fill=ORANGE, size=12)
 
 
 def code(slide, x, y, w, h, lines, size=13):
@@ -259,7 +284,7 @@ s = content_slide("目錄", "今天的內容",
 items = [("01", "認識系統", "三個元件、整體架構、模型實測"),
          ("02", "筆電主機安裝", "雙擊 setup-host.cmd 一次完成"),
          ("03", "同學使用 opencode", "安裝 client、基本操作、提問技巧"),
-         ("04", "Discord bot", "產生 PPT / Word / Excel 草稿"),
+         ("04", "Discord bot", "設定、指令、上線前檢查"),
          ("05", "不在實驗室時", "在家用學校 VPN、校外用 Funnel"),
          ("06", "管理與排錯", "金鑰、換模型、排錯、解除安裝")]
 cw, ch, gap = (CW - Inches(0.5)) / 3, Inches(2.1), Inches(0.25)
@@ -535,6 +560,31 @@ text(s, MX + Inches(6.0), TOP + Inches(4.1), CW - Inches(6.0), Inches(0.5),
      [[("⚠️ servers.json 有金鑰：只私下傳給同學，不要上傳或貼到群組", {"color": RED, "bold": True})]], size=12)
 
 # =============================================================================
+#  9b-2. 實際畫面：install-client 依 servers.json 加入兩台
+# =============================================================================
+s = content_slide("03 同學使用 opencode · 實際畫面", "實際執行：servers.json 有兩台，依序加入",
+                  "這是 servers.json 填了兩台伺服器時，雙擊 install-client.cmd 的實際畫面（右圖接在左圖後面）。"
+                  "第一台實驗室 GPT：先測試連線並列出模型，接著安裝桌面版、寫入設定、裝共用規則，每一步都是 [OK]。"
+                  "第二台國網的金鑰沒填對，出現 401 未經授權：這台會被跳過，其他照常安裝，修好金鑰後再雙擊一次就會補加入，"
+                  "已經加過的不會重複。最後一步裝好文件工具 labdoc 和 /slides、/pdf2word 等指令，"
+                  "看到「完成」後從開始選單開 OpenCode；OpenCode 原本開著的話要先關掉再開，才會讀到新設定。")
+pw = (CW - Inches(0.3)) / 2
+left = screenshot(s, MX, TOP, pw, "install-client-1.png")
+right = screenshot(s, MX + pw + Inches(0.3), TOP, pw, "install-client-2.png")
+highlight(s, left, 0.0, 0.15, 0.44, 0.095, "1")
+highlight(s, right, 0.0, 0.445, 0.83, 0.125, "2")
+highlight(s, right, 0.0, 0.595, 1.0, 0.175, "3")
+cy = TOP + max(left.height, right.height) + Inches(0.25)
+cw = (CW - Inches(0.5)) / 3
+for i, (n, t, d) in enumerate([("1", "測試連線", "列出伺服器上的模型，[OK] 才往下裝"),
+                               ("2", "401 未經授權", "金鑰沒填或填錯：先跳過，修好再雙擊"),
+                               ("3", "文件工具與 /指令", "labdoc、/slides、/pdf2word 等一起裝好")]):
+    x = MX + (cw + Inches(0.25)) * i
+    badge(s, x, cy + Inches(0.02), Inches(0.34), n, fill=ORANGE, size=12)
+    text(s, x + Inches(0.48), cy, cw - Inches(0.5), Inches(0.9),
+         [[(t, {"bold": True, "color": INK, "size": 14})], [(d, {"size": 12})]], space=2, line=1.1)
+
+# =============================================================================
 #  9c. 查看伺服器上有哪些模型
 # =============================================================================
 s = content_slide("03 同學使用 opencode · 管理者", "查看伺服器上有哪些模型",
@@ -639,8 +689,8 @@ s = content_slide("04 Discord bot", "Discord bot：接同一台 vLLM",
                   "也會自動問 vLLM 目前是哪個模型，所以之後換模型、換金鑰，bot 都不用改設定。")
 steps = ["先完成 02 的主機安裝（vLLM 要在跑）",
          "在 discord\\client 執行 deploy.ps1：建環境、自動填好 .env",
-         "Discord Developer Portal 建 bot，打開 MESSAGE CONTENT INTENT",
-         "邀請 bot 時權限要勾 Attach Files，token 填進 .env",
+         "Developer Portal 建 bot：只開 MESSAGE CONTENT INTENT（下一頁）",
+         "用 OAuth2 網址邀請 bot（bot + 四項權限），token 填進 .env",
          "測試：雙擊 start-bot.bat；正式：系統管理員執行 install-autostart.ps1"]
 for i, st in enumerate(steps):
     y = TOP + Inches(0.92) * i
@@ -660,6 +710,36 @@ for i, (t, d) in enumerate([("金鑰", "LLM_API_KEY 留空 → 自動從 WSL 讀
     box(s, MX + Inches(7.3), y, CW - Inches(7.3), Inches(0.95))
     text(s, MX + Inches(7.6), y + Inches(0.12), CW - Inches(7.9), Inches(0.75),
          [[(t, {"bold": True, "color": INK, "size": 15})], [(d, {"size": 13})]], space=2)
+
+# =============================================================================
+#  13b. Developer Portal 設定
+# =============================================================================
+s = content_slide("04 Discord bot · 管理者", "Developer Portal：只開需要的權限",
+                  "程式只用到 Message Content 這一個 privileged intent，其他兩個關掉，少收一類事件也少一份個資。"
+                  "公開機器人一定要關：開著的話，邀請連結外流時別人也能把 bot 拉進他們的伺服器，用的是實驗室的顯卡。"
+                  "關掉之後只有應用程式擁有者能邀請。重新導向 URI 只邀 bot 用不到，可以不填。")
+table(s, MX, TOP, Inches(7.4), [
+    ["Bot 頁的開關", "建議", "原因"],
+    ["公開機器人 Public Bot", "關", "開著時，拿到邀請連結的人都能把 bot 加進自己的伺服器"],
+    ["需要 OAuth2 代碼授權", "關", "只邀請 bot 用不到"],
+    ["Presence Intent", "關", "程式沒用到"],
+    ["Server Members Intent", "關", "程式沒用到；之後要依身分組限制才開"],
+    ["Message Content Intent", "開", "必要：! 指令要讀訊息內容"],
+], [2.5, 0.7, 4.2], size=13, rowh=0.62)
+rx, rw = MX + Inches(7.7), CW - Inches(7.7)
+box(s, rx, TOP, rw, Inches(2.6))
+text(s, rx + Inches(0.3), TOP + Inches(0.25), rw - Inches(0.6), Inches(2.2),
+     [[("OAuth2 → URL 產生器", {"bold": True, "color": INK, "size": 16})],
+      [("範圍：", {"size": 13}), ("bot", {"size": 13, "mono": True, "color": INK})],
+      [("權限：", {"size": 13}),
+       ("View Channels · Send Messages · Read Message History · Attach Files", {"size": 13, "mono": True, "color": INK})],
+      [("Attach Files 用來回傳 pptx / docx / xlsx；不要勾 Administrator。重新導向 URI 不用填。", {"size": 13})]],
+     space=8, line=1.1)
+box(s, rx, TOP + Inches(2.8), rw, Inches(1.25))
+text(s, rx + Inches(0.3), TOP + Inches(2.97), rw - Inches(0.6), Inches(1.0),
+     [[("⚠️ Token 等於 bot 本身", {"bold": True, "color": RED, "size": 15})],
+      [("只放 .env；不要截圖、貼 Notion 或 Discord。外洩就到 Bot 頁 Reset Token", {"size": 13})]],
+     space=4, line=1.1)
 
 # =============================================================================
 #  14. Discord 指令
@@ -687,6 +767,96 @@ box(s, rx, TOP + Inches(2.5), rw, Inches(1.5))
 text(s, rx + Inches(0.3), TOP + Inches(2.7), rw - Inches(0.6), Inches(1.2),
      [[("⚠️ 產出是草稿", {"bold": True, "color": RED, "size": 16})],
       [("文獻標為 [待補]，數據與論述請自行查證", {"size": 14})]], space=6)
+
+# =============================================================================
+#  14b. 頻道與身分組
+# =============================================================================
+s = content_slide("04 Discord bot · 上線前", "頻道與身分組：先決定 bot 在哪裡說話",
+                  "程式目前不檢查身分組，所以誰能用是靠 Discord 的頻道權限：bot 的身分組只開放 llm 頻道。"
+                  "ALLOWED_CHANNEL_ID 預設是空的，這時 bot 會回覆它看得到的每個頻道的每則訊息，上線前一定要填 #llm-問答 的頻道 ID"
+                  "（Discord 設定開啟開發者模式，對頻道按右鍵「複製頻道 ID」）。"
+                  "私訊不受頻道權限管，只要和 bot 在同一個伺服器就能私訊它。")
+table(s, MX, TOP, Inches(7.4), [
+    ["頻道", "用途", "bot 權限"],
+    ["#llm-問答", "一般問答；ID 填進 ALLOWED_CHANNEL_ID", "可讀、可發言"],
+    ["#llm-文件", "!ppt / !word / !excel", "可讀、可發言、可附檔"],
+    ["#llm-公告", "維護、換模型、離線通知", "唯讀"],
+    ["#llm-回報", "錯誤與建議", "看不到"],
+], [1.5, 3.6, 2.3], size=13, rowh=0.62, mono_cols=(0,))
+rx, rw = MX + Inches(7.7), CW - Inches(7.7)
+for i, (t, d) in enumerate([("@實驗室成員", "才看得到 llm 頻道"),
+                            ("@LLM 管理者", "管 bot 設定、發公告"),
+                            ("@llm-bot", "只給 llm 頻道的權限")]):
+    y = TOP + Inches(1.05) * i
+    box(s, rx, y, rw, Inches(0.9))
+    text(s, rx + Inches(0.3), y + Inches(0.12), rw - Inches(0.6), Inches(0.7),
+         [[(t, {"bold": True, "color": INK, "size": 15})], [(d, {"size": 13})]], space=2)
+box(s, MX, TOP + Inches(3.4), CW, Inches(1.1), fill=TINT, line=None)
+text(s, MX + Inches(0.3), TOP + Inches(3.55), CW - Inches(0.6), Inches(0.85),
+     [[("⚠️ .env 的 ALLOWED_CHANNEL_ID 預設空白", {"bold": True, "color": RED, "size": 15})],
+      [("空白時 bot 會回覆它看得到的每個頻道的每則訊息，上線前一定要填", {"size": 13})]], space=4)
+
+# =============================================================================
+#  14c. 安全與隱私
+# =============================================================================
+s = content_slide("04 Discord bot · 上線前", "安全與隱私：模型在本地，對話不在本地",
+                  "opencode 的對話只在實驗室，但 Discord bot 的提問、附件和產出的檔案都會經過 Discord 的伺服器，"
+                  "要跟同學講清楚。bot 的對話記憶是以頻道為單位存在記憶體裡，同頻道所有人共用，bot 重啟就清空。")
+tips = [("1", "訊息存在 Discord 雲端", "提問、附件、產出的檔案都經過 Discord；未公開數據、個資、帳密不要貼"),
+        ("2", "記憶是整個頻道共用", "同頻道的人共用最近 10 則對話；換話題先 !reset，私事用私訊"),
+        ("3", "Token 只放 .env", ".env 已在 .gitignore；截圖、群組都別貼，外洩就 Reset Token"),
+        ("4", "產出是草稿", "文獻標 [待補]、數據要查證，交出去前要人工檢查")]
+cw, ch = (CW - Inches(0.3)) / 2, Inches(1.7)
+for i, (n, t, d) in enumerate(tips):
+    x, y = MX + (cw + Inches(0.3)) * (i % 2), TOP + (ch + Inches(0.3)) * (i // 2)
+    box(s, x, y, cw, ch)
+    badge(s, x + Inches(0.3), y + Inches(0.3), Inches(0.55), n, size=15)
+    text(s, x + Inches(1.1), y + Inches(0.28), cw - Inches(1.4), Inches(1.5),
+         [[(t, {"bold": True, "color": INK, "size": 17})], [(d, {"size": 14})]], space=4, line=1.1)
+
+# =============================================================================
+#  14d. 資源與維運
+# =============================================================================
+s = content_slide("04 Discord bot · 管理者", "資源與維運：一張顯卡，出事要查得到",
+                  "bot 和 opencode 共用同一張顯卡，4B 模型五人同時的總吞吐約 121 tok/s。"
+                  "程式目前沒有限流和排隊，一個人連續丟好幾個 !ppt 就會拖慢其他人。"
+                  "右欄是建議，還沒寫進程式；log 只記中繼資料，不記訊息全文。")
+table(s, MX, TOP, CW, [
+    ["項目", "現況", "建議"],
+    ["共用顯卡", "bot 與 opencode 共用，沒有限流", "每人冷卻、一次一個產檔；排隊時先回「處理中」"],
+    ["筆電休眠", "睡眠或重開機時 bot 離線", "電源設永不睡眠；離線時在 #llm-公告 通知"],
+    ["使用紀錄", "只在終端機印上線訊息", "寫 log：時間、使用者、指令、耗時、錯誤"],
+    ["健康檢查", "同學自己發現沒回應", "加 !status：目前模型、排隊數"],
+    ["Token / 套件", "沒有固定規則", "每學期 Reset Token；定期更新 discord.py"],
+    ["交接", "設定只在個人帳號", "Developer Portal 建 Team，加第二位管理者"],
+], [1.6, 3.6, 5.0], size=14, rowh=0.6)
+
+# =============================================================================
+#  14e. 上線前檢查與待決定
+# =============================================================================
+s = content_slide("04 Discord bot · 上線前", "上線前檢查，與要一起決定的事",
+                  "左邊照順序做完就能上線。右邊四件事牽涉程式修改或使用規範，建議組會討論後再決定。"
+                  "斜線指令是 Discord 目前推薦的做法，改用後 bot 就不需要讀所有訊息的內容。")
+table(s, MX, TOP, Inches(6.9), [
+    ["狀態", "項目"],
+    ["完成", "建立 llm-bot，開啟 Message Content Intent"],
+    ["待辦", "關閉公開機器人、Presence、Server Members"],
+    ["待辦", "用 OAuth2 網址邀請 bot（bot + 四項權限）"],
+    ["待辦", "建頻道與身分組，填 ALLOWED_CHANNEL_ID"],
+    ["待辦", "deploy.ps1、填 Token、install-autostart.ps1"],
+    ["待辦", "每個指令實測一次（含附件、回覆訊息）"],
+    ["待辦", "重開機後確認 bot 自動上線"],
+    ["待辦", "#llm-公告 貼使用規範與指令表"],
+], [0.9, 6.0], size=13, rowh=0.5)
+rx, rw = MX + Inches(7.2), CW - Inches(7.2)
+for i, (t, d) in enumerate([("誰能用？", "全伺服器，或只限 @實驗室成員（要改程式檢查身分組）"),
+                            ("開放私訊嗎？", "私訊不受頻道權限管，同伺服器的人都能用"),
+                            ("記憶怎麼分？", "維持每頻道共用，或改成每人、每個討論串"),
+                            ("改用斜線指令？", "/ppt 有提示好上手，長期可不用 Message Content")]):
+    y = TOP + Inches(1.15) * i
+    box(s, rx, y, rw, Inches(1.0))
+    text(s, rx + Inches(0.3), y + Inches(0.12), rw - Inches(0.6), Inches(0.8),
+         [[(t, {"bold": True, "color": INK, "size": 15})], [(d, {"size": 13})]], space=2, line=1.1)
 
 # =============================================================================
 #  15. 不在實驗室時
