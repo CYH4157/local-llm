@@ -1,9 +1,10 @@
 """
-llm_client.py — 呼叫實驗室筆電上的 vLLM（opencode 專案架設的那台，OpenAI 相容 API）。
+llm_client.py — 呼叫實驗室主機上的 vLLM（server/vllm 架設的那台，OpenAI 相容 API）。
 
-• 模型：自動使用 vLLM 目前載入的模型（/v1/models），筆電用 vllmctl 換模型後 bot 不用改設定
-• 金鑰：.env 的 LLM_API_KEY 留空時，自動從 WSL 的 ~/vllm-server/vllm.env 讀 SERVE_API_KEY；
-        筆電執行 vllmctl new-key 換金鑰後，遇到 401 會自動重讀一次
+• 模型：自動使用 vLLM 目前載入的模型（/v1/models），主機用 vllmctl 換模型後 bot 不用改設定
+• 金鑰：.env 的 LLM_API_KEY 留空時，自動讀主機的 ~/vllm-server/vllm.env 裡的 SERVE_API_KEY：
+        Ubuntu 伺服器（例如 H200）直接讀檔；Windows 筆電從 WSL 讀。
+        主機執行 vllmctl new-key 換金鑰後，遇到 401 會自動重讀一次
 """
 
 import json
@@ -15,7 +16,8 @@ import time
 import requests
 
 BASE_URL   = os.getenv("LLM_BASE_URL", "http://127.0.0.1:8000/v1").strip().rstrip("/")
-WSL_DISTRO = os.getenv("WSL_DISTRO", "Ubuntu").strip() or "Ubuntu"
+WSL_DISTRO = os.getenv("WSL_DISTRO", "Ubuntu").strip() or "Ubuntu"   # 只有 Windows 用
+VLLM_ENV   = os.path.expanduser(os.getenv("VLLM_ENV_FILE", "~/vllm-server/vllm.env"))   # 只有 Linux 用
 # 第一次載入模型、或多人同時使用時可能較慢，timeout 給寬一點
 TIMEOUT    = int(os.getenv("LLM_TIMEOUT", "600"))
 
@@ -29,8 +31,18 @@ class AuthError(RuntimeError):
     pass
 
 
-def read_key_from_wsl() -> str:
-    """跟 opencode 的 install-client 一樣，從 WSL 的 vllm.env 讀金鑰（只在筆電本機有效）。"""
+def read_key_from_host() -> str:
+    """讀 vLLM 主機的金鑰：Linux 直接讀 vllm.env；Windows 從 WSL 讀（跟 opencode 的 install-client 一樣）。"""
+    if os.name != "nt":
+        try:
+            with open(VLLM_ENV, encoding="utf-8") as f:
+                for line in f:
+                    m = re.match(r'^\s*SERVE_API_KEY="?([^"\s]*)"?\s*$', line)
+                    if m:
+                        return m.group(1)
+        except OSError:
+            pass
+        return ""
     try:
         out = subprocess.run(
             ["wsl.exe", "-d", WSL_DISTRO, "-e", "bash", "-c",
@@ -46,14 +58,14 @@ def read_key_from_wsl() -> str:
 def _key(refresh: bool = False) -> str:
     global _api_key
     if refresh or not _api_key:
-        k = read_key_from_wsl()
+        k = read_key_from_host()
         if k:
             _api_key = k
     return _api_key
 
 
 def _request(method: str, path: str, timeout: int, **kw) -> requests.Response:
-    """送出請求；401 時重讀 WSL 金鑰再試一次（vllmctl new-key 換過金鑰的情況）。"""
+    """送出請求；401 時重讀主機金鑰再試一次（vllmctl new-key 換過金鑰的情況）。"""
     for attempt in (0, 1):
         headers = {"Authorization": f"Bearer {_key(refresh=attempt == 1)}"}
         r = requests.request(method, f"{BASE_URL}{path}", headers=headers, timeout=timeout, **kw)
@@ -101,7 +113,7 @@ def chat(messages: list[dict], max_tokens: int | None = None,
         if response_format:
             payload["response_format"] = response_format
         r = _request("POST", "/chat/completions", timeout=TIMEOUT, json=payload)
-        # 404 = 筆電剛換了模型、快取的名字已不存在 → 重抓一次模型名稱
+        # 404 = 主機剛換了模型、快取的名字已不存在 → 重抓一次模型名稱
         if r.status_code == 404 and attempt == 0:
             continue
         if r.status_code >= 400:

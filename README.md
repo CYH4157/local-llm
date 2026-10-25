@@ -29,6 +29,7 @@
 |---|---|
 | **管理者：架主機** | 雙擊 `server\wsl2\setup-host.cmd` → 記下網址與金鑰 |
 | **管理者：架 Discord bot** | `discord\client\deploy.ps1` → `.env` 填 Discord token → `install-autostart.ps1` |
+| **管理者：Ubuntu 伺服器架 Discord bot** | `bash discord/client/deploy.sh --token <Discord_bot_token>`（systemd 服務 `discord-bot`） |
 | **同學：裝 opencode** | 雙擊 `opencode\client\install-client.cmd` → 貼上網址與金鑰 → `opencode` |
 | **同學在家** | 先連學校 VPN，其他同上 |
 | **日常管理** | 雙擊 `server\wsl2\vllmctl.cmd`：`info` / `logs` / `preset` / `new-key` / `bench` |

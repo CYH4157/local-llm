@@ -1,5 +1,6 @@
 """
-discord_bot.py — 把實驗室筆電上的 vLLM（opencode 專案架設的那台）接到 Discord。
+discord_bot.py — 把實驗室主機上的 vLLM（opencode 共用的那台）接到 Discord。
+可以跑在 Windows 筆電（deploy.ps1，vLLM 在 WSL）或 Ubuntu 伺服器（deploy.sh，systemd 服務 discord-bot）。
 
 指令：
     (直接聊天)                在允許的頻道發訊息、@提及 bot、或私訊 → 一般問答（離線）
@@ -7,7 +8,7 @@ discord_bot.py — 把實驗室筆電上的 vLLM（opencode 專案架設的那�
     !ppt <主題/需求>          產生 PowerPoint (.pptx)
     !word [計畫|報告] <需求>  產生 Word (.docx)；計畫=國科會計畫格式、報告=課堂報告
     !excel <需求>             產生 Excel (.xlsx)
-    !model                    顯示筆電 vLLM 目前載入的模型（換模型請在筆電用 vllmctl）
+    !model                    顯示 vLLM 目前載入的模型（換模型請在主機用 vllmctl）
     !reset                    清空這個頻道的對話記憶
     !help                     顯示說明
 
@@ -206,12 +207,12 @@ async def run_blocking(func, *args, **kwargs):
 
 def friendly_error(e: Exception) -> str:
     if isinstance(e, requests.exceptions.ConnectionError):
-        return ("⚠️ 連不上筆電上的 vLLM。請在筆電雙擊 `server\\wsl2\\vllmctl.cmd` 輸入 `status` 檢查，"
-                "或輸入 `start` 啟動。")
+        return ("⚠️ 連不上 vLLM。請管理者在主機執行 `vllmctl status` 檢查、`vllmctl start` 啟動"
+                "（Windows 筆電：雙擊 `server\\wsl2\\vllmctl.cmd`；Ubuntu 伺服器：`bash ~/local-llm/server/vllm/vllmctl.sh`）。")
     if isinstance(e, requests.exceptions.Timeout):
         return "⚠️ 模型回應逾時（可能正在換模型，或很多人同時使用），請稍後再試。"
     if isinstance(e, llm_client.AuthError):
-        return ("⚠️ vLLM 拒絕連線（API 金鑰錯誤），bot 從 WSL 重讀金鑰後仍失敗。"
+        return ("⚠️ vLLM 拒絕連線（API 金鑰錯誤），bot 重讀主機的金鑰後仍失敗。"
                 "若 `.env` 有填 `LLM_API_KEY`，請清空讓 bot 自動讀取，再重啟 bot。")
     if llm_client.is_context_error(e):
         return "⚠️ 內容太長，超過模型的上下文長度。請用 `!reset` 清記憶，或縮短參考資料。"
@@ -257,7 +258,7 @@ async def cmd_model(channel):
         return
     await channel.send(
         f"🤖 目前模型：`{m['id']}`（上下文 {m['max_model_len']} tokens）\n"
-        "和實驗室的 opencode 共用同一個 vLLM。要換模型請在筆電用 `server\\wsl2\\vllmctl.cmd`，"
+        "和實驗室的 opencode 共用同一個 vLLM。要換模型請在主機用 `vllmctl`，"
         "bot 會自動跟著換，不用改設定。")
 
 
