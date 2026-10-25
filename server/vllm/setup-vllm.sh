@@ -13,7 +13,8 @@
 #  依 GPU 自動調整（不用手動設定）：
 #      顯存     → 模型組合：RTX 4070 Laptop 8GB=small、RTX 4070 / 5070 Ti 12GB=laptop、H100-20C vGPU=medium、
 #                 H100 80GB=large、H200 141GB=xlarge
-#      架構     → 注意力後端：RTX 50（Blackwell）沒有 CUDA Toolkit 時用 Triton，其他交給 vLLM 選 FlashAttention
+#      架構     → 注意力後端：沒有 CUDA Toolkit 時，RTX 50（Blackwell）、以及 RTX 30/40 用 FP8 KV cache 時用 Triton；
+#                 H100 / H200 交給 vLLM 選 FlashAttention
 #                 RTX 30 / A100（沒有 FP8 硬體）KV cache 不用 FP8
 #      驅動版本 → 驅動只到 CUDA 12.x（例如 vGPU）時裝 vLLM 的 CUDA 12.9 版
 #      --model  HF_ID      自訂 Hugging Face 模型（搭配 --name / --max-len / --tool-parser）
@@ -181,7 +182,7 @@ case "${SERVE_ATTN_BACKEND-}" in
         [ -z "${SERVE_ATTN_BACKEND-}" ] || warn "注意力後端由 TRITON_ATTN 改成 auto（依 GPU 自動選）"
         SERVE_ATTN_BACKEND=auto ;;
 esac
-ATTN_NOW="$(auto_attn_backend)"
+ATTN_NOW="$(auto_attn_backend "${SERVE_EXTRA_ARGS:-}")"
 ok "注意力後端：auto → ${ATTN_NOW:-FlashAttention（vLLM 自動選）}"
 SERVE_PORT="${PORT:-${SERVE_PORT:-8000}}"
 SERVE_HOST="${HOST:-${SERVE_HOST:-0.0.0.0}}"
@@ -206,7 +207,7 @@ SERVE_GPU_UTIL="$SERVE_GPU_UTIL"
 SERVE_TOOL_PARSER="$SERVE_TOOL_PARSER"
 # 其他 vllm serve 參數，例：--tensor-parallel-size 2（兩張 GPU）
 SERVE_EXTRA_ARGS="$(esc "$SERVE_EXTRA_ARGS")"
-# 注意力運算後端：auto = 依 GPU 自動選（RTX 50 沒有 CUDA Toolkit 時用 TRITON_ATTN，其他交給 vLLM）；
+# 注意力運算後端：auto = 依 GPU 自動選（沒有 CUDA Toolkit 時：RTX 50、或 RTX 30/40 用 FP8 KV cache → TRITON_ATTN；H100 / H200 交給 vLLM）；
 #   也可以指定 FLASH_ATTN / FLASHINFER / TRITON_ATTN；空白 = 完全交給 vLLM
 SERVE_ATTN_BACKEND="$SERVE_ATTN_BACKEND"
 
@@ -244,12 +245,18 @@ if [ -n "${SERVE_TOOL_PARSER:-}" ]; then
     args+=(--enable-auto-tool-choice --tool-call-parser "$SERVE_TOOL_PARSER")
 fi
 if [ "${SERVE_ATTN_BACKEND:-}" = auto ]; then
-    # Blackwell（compute capability 10 以上，例如 RTX 50）沒有 nvcc → Triton；其他交給 vLLM
+    # 規則同 lib.sh 的 auto_attn_backend：沒有 nvcc 時，Blackwell（10 以上，例如 RTX 50）一律 Triton；
+    # Hopper 以前（RTX 30/40、A100）用 FP8 KV cache 也用 Triton；H100 / H200 及有 nvcc 時交給 vLLM
     SERVE_ATTN_BACKEND=""
     SMI="$(command -v nvidia-smi || echo /usr/lib/wsl/lib/nvidia-smi)"
     CC_MAJOR="$("$SMI" --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1 | cut -d. -f1 || true)"
-    if [ "${CC_MAJOR:-0}" -ge 10 ] && ! command -v nvcc >/dev/null 2>&1 && [ ! -x /usr/local/cuda/bin/nvcc ]; then
-        SERVE_ATTN_BACKEND=TRITON_ATTN
+    CC_MAJOR="${CC_MAJOR:-0}"
+    if ! command -v nvcc >/dev/null 2>&1 && [ ! -x /usr/local/cuda/bin/nvcc ]; then
+        if [ "$CC_MAJOR" -ge 10 ]; then
+            SERVE_ATTN_BACKEND=TRITON_ATTN
+        elif [ "$CC_MAJOR" -ge 1 ] && [ "$CC_MAJOR" -lt 9 ] && [[ "${SERVE_EXTRA_ARGS:-}" == *"--kv-cache-dtype fp8"* ]]; then
+            SERVE_ATTN_BACKEND=TRITON_ATTN
+        fi
     fi
 fi
 if [ -n "${SERVE_ATTN_BACKEND:-}" ]; then

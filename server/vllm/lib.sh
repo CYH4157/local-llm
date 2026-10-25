@@ -61,12 +61,19 @@ gpu_detect() {
 
 has_nvcc() { command -v nvcc >/dev/null 2>&1 || [ -x /usr/local/cuda/bin/nvcc ]; }
 
-# 注意力運算後端（SERVE_ATTN_BACKEND=auto 時用）：
-#   Blackwell 預設用 FlashInfer，沒有 CUDA Toolkit（nvcc）時暖機會現場編譯失敗 → Triton
-#   其他（RTX 30/40、A100、H100、H200）交給 vLLM 選 FlashAttention，不需要 nvcc；強制 Triton 反而慢又不穩
+# 注意力運算後端（SERVE_ATTN_BACKEND=auto 時用；run-vllm.sh 啟動時用同樣的規則）：
+#   有 CUDA Toolkit（nvcc）→ 交給 vLLM
+#   Blackwell（RTX 50、B200）預設用 FlashInfer，沒有 nvcc 時暖機會現場編譯失敗 → Triton
+#   Hopper 以前（RTX 30/40、A100）的 FlashAttention 不支援 FP8 KV cache，vLLM 會改找 FlashInfer → 同樣的風險 → Triton
+#   H100 / H200 的 FlashAttention（FA3）支援 FP8 KV cache → 交給 vLLM；強制 Triton 反而慢又不穩（H200 實測卡住）
+# $1 = vllm serve 的其他參數（看有沒有 --kv-cache-dtype fp8）
 auto_attn_backend() {
     local major="${GPU_CC%%.*}"
-    if [ "${major:-0}" -ge 10 ] && ! has_nvcc; then echo TRITON_ATTN; else echo ""; fi
+    if has_nvcc; then echo ""
+    elif [ "${major:-0}" -ge 10 ]; then echo TRITON_ATTN
+    elif [ "${major:-0}" -ge 1 ] && [ "${major:-0}" -lt 9 ] && [[ "${1:-}" == *"--kv-cache-dtype fp8"* ]]; then echo TRITON_ATTN
+    else echo ""
+    fi
 }
 
 # 所有組合共用的基本參數：
