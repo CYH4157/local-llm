@@ -110,7 +110,7 @@ load_env
 [ -f "$PROFILE_DIR/$SERVE_NAME.env" ] || save_profile
 case "$cmd" in
     info)
-        LIP="$(lan_ip)"; HOSTIP="${LIP:-<筆電IP>}"
+        LHOST="$(lan_host)"; HOSTIP="${LHOST:-$(lan_ip)}"; HOSTIP="${HOSTIP:-<筆電IP>}"
         echo "模型名稱：$SERVE_NAME   ($SERVE_MODEL, 上下文 $SERVE_MAX_LEN)"
         echo "vLLM 網址：http://$HOSTIP:$SERVE_PORT/v1"
         echo "API 金鑰 ：$SERVE_API_KEY"

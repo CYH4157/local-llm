@@ -6,7 +6,7 @@
  管理者也可以先把網址、金鑰填進 opencode\servers.json（照 servers.example.json 複製），
  同學雙擊後就會自動加入裡面的每一台，不用自己輸入（servers.json 有金鑰，不會上傳到 git）。
  或在 PowerShell 執行（網址與金鑰在筆電上執行 bash vllmctl.sh info 可看到）：
-     powershell -ExecutionPolicy Bypass -File install-client.ps1 -Url http://192.168.1.23:8000/v1 -Key sk-vllm-xxx
+     powershell -ExecutionPolicy Bypass -File install-client.ps1 -Url http://CYH.local:8000/v1 -Key sk-vllm-xxx
 
  參數：
      -Url          筆電的 vLLM 網址（要含 /v1）
@@ -167,7 +167,7 @@ if (-not $Url -and -not $FromList -and (Test-Path $listPath)) {
     exit $(if ($failed) { 1 } else { 0 })
 }
 
-if (-not $Url) { $Url = Read-Host "筆電的 vLLM 網址（例：http://192.168.1.23:8000/v1）" }
+if (-not $Url) { $Url = Read-Host "筆電的 vLLM 網址（例：http://CYH.local:8000/v1，CYH 換成筆電名稱）" }
 # 在筆電本機安裝（網址是 127.0.0.1 / localhost）且沒給金鑰：直接從 WSL 的 vllm.env 讀，指令裡不必出現金鑰
 if (-not $Key -and $Url -match '://(127\.0\.0\.1|localhost)[:/]') {
     $distro = "Ubuntu"

@@ -4,7 +4,7 @@
 #  （Windows 電腦請改用同資料夾的 install-client.cmd）
 #
 #  用法（網址與金鑰在筆電雙擊 server\wsl2\vllmctl.cmd 輸入 info 可看到）：
-#      bash install-client.sh --url http://192.168.1.23:8000/v1 --key sk-vllm-xxx --name laptop
+#      bash install-client.sh --url http://CYH.local:8000/v1 --key sk-vllm-xxx --name laptop
 #
 #  參數：
 #      --url URL     vLLM 的 OpenAI 相容網址（要含 /v1）

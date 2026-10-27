@@ -309,6 +309,10 @@ if ($EnableSsh) {
 Step "8. 測試連線"
 $ip = (Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq "Up" } |
        Select-Object -First 1).IPv4Address.IPAddress
+# 給同學用 mDNS 名稱（例 CYH.local），實驗室 DHCP 換 IP 也不用改設定；
+# 不用裸主機名稱：Wi-Fi 是「公用」網路時 LLMNR/NetBIOS 會被防火牆擋，mDNS 不會
+$lanHost = "$([System.Net.Dns]::GetHostName()).local"
+$lanUrl  = "http://${lanHost}:$Port/v1"
 $okLocal = $false
 foreach ($i in 1..60) {
     try {
@@ -323,6 +327,10 @@ if ($Mirrored -and $ip) {
         Invoke-RestMethod "http://${ip}:$Port/v1/models" -TimeoutSec 5 -Headers @{ Authorization = "Bearer $Key" } | Out-Null
         Ok "區網：http://${ip}:$Port/v1"
     } catch { Warn "用區網 IP 連線失敗（$($_.Exception.Message)），請用另一台電腦再測試" }
+    try {
+        Invoke-RestMethod $lanUrl.Replace("/v1", "/v1/models") -TimeoutSec 5 -Headers @{ Authorization = "Bearer $Key" } | Out-Null
+        Ok "名稱：$lanUrl"
+    } catch { Warn "用名稱 $lanHost 連線失敗（$($_.Exception.Message)），請用另一台電腦再測試" }
 }
 
 if (-not $SkipOpencode) {
@@ -332,13 +340,13 @@ if (-not $SkipOpencode) {
 
 Step "完成！把以下資訊給實驗室同學"
 Write-Host ""
-Write-Host "  vLLM 網址：http://${ip}:$Port/v1" -ForegroundColor Cyan
+Write-Host "  vLLM 網址：$lanUrl" -ForegroundColor Cyan
 Write-Host "  API 金鑰 ：$Key" -ForegroundColor Cyan
 Write-Host "  模型名稱 ：$Model" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  同學的 Windows 電腦：複製 opencode 資料夾 → 雙擊 opencode\client\install-client.cmd → 貼上網址與金鑰"
-Write-Host "  同學的 Ubuntu 電腦 ：bash opencode/client/install-client.sh --url http://${ip}:$Port/v1 --key $Key --name laptop"
-if ($EnableSsh) { Write-Host "  SSH 進這台：ssh $env:USERNAME@$ip（登入後輸入 opencode）" }
+Write-Host "  同學的 Ubuntu 電腦 ：bash opencode/client/install-client.sh --url $lanUrl --key $Key --name laptop"
+if ($EnableSsh) { Write-Host "  SSH 進這台：ssh $env:USERNAME@$lanHost（登入後輸入 opencode）" }
 Write-Host ""
 Write-Host "  這台自己用：開始選單開「OpenCode」（桌面版），開啟專案資料夾"
 Write-Host "  管理 vLLM ：雙擊 vllmctl.cmd（status / logs / restart / preset / new-key）"

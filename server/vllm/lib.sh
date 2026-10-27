@@ -170,3 +170,11 @@ gen_key() { echo "sk-vllm-$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
 
 # 這台機器的區網 IP（WSL mirrored 模式下就是筆電的 IP）
 lan_ip() { hostname -I 2>/dev/null | tr ' ' '\n' | grep -vE '^(127\.|172\.17\.|169\.254\.)' | grep -E '^[0-9]+\.' | head -n1 || true; }
+
+# 筆電的 mDNS 名稱（例 CYH.local）：實驗室 DHCP 換 IP 也不用改 client 設定；不在 WSL（例 Ubuntu 伺服器）就回空字串
+# 用 .local（mDNS）而不用裸主機名稱：實驗室 Wi-Fi 常被設成「公用」網路，LLMNR/NetBIOS 會被防火牆擋，mDNS 不會
+lan_host() {
+    grep -qi microsoft /proc/version 2>/dev/null || return 0
+    local h; h="$(cmd.exe /c hostname 2>/dev/null | tr -d '\r\n')"
+    echo "${h:-$(hostname)}.local"
+}
