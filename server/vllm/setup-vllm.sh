@@ -34,7 +34,9 @@
 #      run-vllm.sh     systemd 呼叫的啟動腳本
 #  重新執行本腳本是安全的：沒給參數時會沿用 vllm.env 的設定，只更新 vLLM 版本與服務。
 # =============================================================================
-set -euo pipefail
+set -Eeuo pipefail
+# 指令意外失敗時印出是哪一行，不會沒有訊息就結束（例：新版驅動 nvidia-smi 的輸出格式改了）
+trap 'printf "  \033[31m[X]\033[0m  第 %s 行執行失敗：%s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 . "$HERE/lib.sh"
@@ -112,8 +114,14 @@ export PATH="$HOME/.local/bin:$PATH"
 mkdir -p "$APP_DIR"
 [ -d "$APP_DIR/.venv" ] || uv venv --python 3.12 "$APP_DIR/.venv"
 # PyPI 上的 vLLM 是 CUDA 13 版，需要 580 以上的驅動；驅動只到 CUDA 12.x（例如 vGPU）時改裝 GitHub 上的 +cu129 版
-DRIVER_CUDA="$(nvidia-smi | grep -oP 'CUDA Version:\s*\K[0-9]+' | head -n1)"
-if [ "${DRIVER_CUDA:-13}" -ge 13 ]; then
+# 先讀 nvidia-smi 表頭的「CUDA Version: 13.1」；新版驅動格式不同抓不到時，改用驅動版本推算（580 以上 = CUDA 13）
+DRIVER_VER="$(smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n1 | tr -d ' ' || true)"
+DRIVER_CUDA="$(smi 2>/dev/null | sed -n 's/.*CUDA Version:[^0-9]*\([0-9][0-9]*\)\..*/\1/p' | head -n1 || true)"
+if [ -z "$DRIVER_CUDA" ]; then
+    if [ "${DRIVER_VER%%.*}" -ge 580 ] 2>/dev/null; then DRIVER_CUDA=13; else DRIVER_CUDA=12; fi
+fi
+ok "驅動 ${DRIVER_VER:-未知}，支援 CUDA $DRIVER_CUDA"
+if [ "$DRIVER_CUDA" -ge 13 ]; then
     uv pip install --python "$APP_DIR/.venv/bin/python" -U vllm --torch-backend=auto
 else
     # 不是每一版都有 +cu129 檔案，從最近的正式版往回找第一個有的
