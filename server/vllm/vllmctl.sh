@@ -110,9 +110,10 @@ load_env
 [ -f "$PROFILE_DIR/$SERVE_NAME.env" ] || save_profile
 case "$cmd" in
     info)
-        LHOST="$(lan_host)"; HOSTIP="${LHOST:-$(lan_ip)}"; HOSTIP="${HOSTIP:-<筆電IP>}"
+        LIP="$(lan_ip)"; LHOST="$(lan_host)"; HOSTIP="${LHOST:-$LIP}"; HOSTIP="${HOSTIP:-<筆電IP>}"
         echo "模型名稱：$SERVE_NAME   ($SERVE_MODEL, 上下文 $SERVE_MAX_LEN)"
         echo "vLLM 網址：http://$HOSTIP:$SERVE_PORT/v1"
+        [ -n "$LHOST" ] && [ -n "$LIP" ] && echo "目前 IP  ：http://$LIP:$SERVE_PORT/v1（DHCP 會換，給同學請用上面的網址）"
         echo "API 金鑰 ：$SERVE_API_KEY"
         echo
         echo "同學的 Windows 電腦：複製 opencode 資料夾 → 雙擊 opencode\\client\\install-client.cmd → 貼上上面的網址與金鑰"
