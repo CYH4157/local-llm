@@ -60,6 +60,8 @@ function Show-Usage {
 # --- 文件工具 labdoc 與 /指令（每台電腦裝一次，跟連哪台伺服器無關） -------------
 # labdoc 裝在獨立的 Python venv，不影響使用者自己的 Python；
 # 用 pip 產生的 labdoc.exe 啟動（不能用 .cmd：經過 cmd.exe 時 PowerShell 5.1 會把中文輸出轉成 Big5，opencode 讀到亂碼）
+$LabPython = "3.12"   # labdoc 用的 Python 版本（實驗室測過；uv 會自動下載）
+
 function Find-Python {
     foreach ($c in @(@("py", "-3"), @("python"), @("python3"))) {
         if (-not (Get-Command $c[0] -ErrorAction SilentlyContinue)) { continue }
@@ -80,20 +82,32 @@ function Install-LabTools {
     $binDir  = Join-Path $toolDir "bin"
     if (-not (Test-Path (Join-Path $src "labdoc.py"))) { Warn "找不到 $src，略過"; return }
     try {
+        # 固定用 uv 下載的 Python 3.12（跟 vLLM、Discord bot 一樣），不受每台電腦自己裝的 Python 版本影響；
+        # 舊版用系統 Python 建的環境不是 3.12 就重建
+        $venvDir = Join-Path $toolDir "venv"
+        if (Test-Path $venvPy) {
+            $ver = try { "$(& $venvPy -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null)".Trim() } catch { "" }
+            if ($ver -ne $LabPython) {
+                Write-Host "  Python 環境是 $(if ($ver) { $ver } else { '壞掉的' }) 版，重建成 $LabPython"
+                Remove-Item $venvDir -Recurse -Force
+            }
+        }
         if (-not (Test-Path $venvPy)) {
-            $py = Find-Python
-            if ($py) {
-                Write-Host "  建立 Python 環境（使用 $py）"
-                & $py -m venv (Join-Path $toolDir "venv")
+            $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+            if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+                Write-Host "  安裝 uv（用來下載固定版本的 Python，裝在使用者目錄，不需系統管理員）"
+                $env:UV_NO_MODIFY_PATH = "1"
+                try { Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression } catch { Warn "uv 安裝失敗：$($_.Exception.Message)" }
+            }
+            if (Get-Command uv -ErrorAction SilentlyContinue) {
+                Write-Host "  建立 Python $LabPython 環境（uv）"
+                uv venv --seed --python $LabPython $venvDir
             } else {
-                # 沒有 Python：用 uv 下載一份獨立的 Python（裝在使用者目錄，不需系統管理員）
-                if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-                    Write-Host "  這台沒有 Python，安裝 uv 來下載 Python"
-                    $env:UV_NO_MODIFY_PATH = "1"
-                    Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
-                    $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
-                }
-                uv venv --seed --python 3.12 (Join-Path $toolDir "venv")
+                # 連不到 astral.sh（網路擋）才退回這台自己的 Python
+                $py = Find-Python
+                if (-not $py) { throw "沒有 uv 也找不到 Python 3.9 以上：請安裝 Python 3.12 後重跑" }
+                Warn "改用這台的 Python（$py），版本跟實驗室測過的 $LabPython 可能不同"
+                & $py -m venv $venvDir
             }
             if (-not (Test-Path $venvPy)) { throw "建立 Python 環境失敗" }
         }

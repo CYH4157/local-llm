@@ -52,8 +52,6 @@ case "$URL" in */v1) ;; *) URL="$URL/v1" ;; esac
 step "1. 必要套件"
 need=()
 for c in curl jq python3; do command -v "$c" >/dev/null 2>&1 || need+=("$c"); done
-# labdoc 要用 venv（Ubuntu 的 python3 預設沒有 venv 模組）
-if [ "$SKIP_TOOLS" = 0 ] && ! python3 -c 'import ensurepip, venv' >/dev/null 2>&1; then need+=(python3-venv); fi
 if [ ${#need[@]} -gt 0 ]; then sudo apt-get update -y && sudo apt-get install -y "${need[@]}"; fi
 ok "完成"
 
@@ -154,9 +152,18 @@ if [ "$SKIP_TOOLS" = 1 ]; then
 else
     step "6. 安裝文件工具 labdoc 與 /指令"
     TOOL_DIR="$CFG_DIR/labdoc"
+    # 固定用 uv 下載的 Python 3.12（跟 vLLM、Discord bot 一樣），不受系統 Python 版本影響（Ubuntu 26.04 是 3.14）；
+    # 舊版用系統 Python 建的環境不是 3.12 就重建
+    LAB_PYTHON=3.12
+    if [ -x "$TOOL_DIR/venv/bin/python" ] &&
+       [ "$("$TOOL_DIR/venv/bin/python" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)" != "$LAB_PYTHON" ]; then
+        warn "labdoc 的 Python 環境不是 $LAB_PYTHON，重建"
+        rm -rf "$TOOL_DIR/venv"
+    fi
+    command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh || true
     if [ ! -f "$HERE/labdoc/labdoc.py" ]; then
         warn "找不到 $HERE/labdoc，略過"
-    elif { [ -x "$TOOL_DIR/venv/bin/python" ] || python3 -m venv "$TOOL_DIR/venv"; } &&
+    elif { [ -x "$TOOL_DIR/venv/bin/python" ] || uv venv --seed --python "$LAB_PYTHON" "$TOOL_DIR/venv"; } &&
          TMP_SRC="$(mktemp -d)" && cp -r "$HERE/labdoc/." "$TMP_SRC/" &&
          echo "  安裝 Python 套件（第一次約 450MB，請稍候）…" &&
          "$TOOL_DIR/venv/bin/python" -m pip install --disable-pip-version-check -q --upgrade "$TMP_SRC"; then
