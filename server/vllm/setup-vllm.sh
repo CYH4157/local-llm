@@ -122,7 +122,15 @@ if [ -z "$DRIVER_CUDA" ]; then
 fi
 ok "驅動 ${DRIVER_VER:-未知}，支援 CUDA $DRIVER_CUDA"
 if [ "$DRIVER_CUDA" -ge 13 ]; then
-    uv pip install --python "$APP_DIR/.venv/bin/python" -U vllm --torch-backend=auto
+    # 固定 cu130（PyPI 的 vLLM 就是用 CUDA 13.0 編的）：--torch-backend=auto 會照驅動挑最新的 CUDA，
+    # 驅動支援 13.2（例：RTX 4070 + 610 驅動）時 PyTorch 裝成 cu132、TorchAudio 卻只有 cu130 → vLLM 啟動就報 CUDA 版本不一致
+    TORCH_CUDA="$("$APP_DIR/.venv/bin/python" -c 'import torch; print(torch.version.cuda or "")' 2>/dev/null || true)"
+    REINSTALL=()
+    if [ -n "$TORCH_CUDA" ] && [ "$TORCH_CUDA" != "13.0" ]; then
+        warn "已安裝的 PyTorch 是 CUDA $TORCH_CUDA 版，重裝成 CUDA 13.0 版（跟 vLLM、TorchAudio 一致）"
+        REINSTALL=(--reinstall-package torch --reinstall-package torchaudio --reinstall-package torchvision)
+    fi
+    uv pip install --python "$APP_DIR/.venv/bin/python" -U vllm --torch-backend=cu130 "${REINSTALL[@]}"
 else
     # 不是每一版都有 +cu129 檔案，從最近的正式版往回找第一個有的
     WHEEL_URL="$(curl -fsSL 'https://api.github.com/repos/vllm-project/vllm/releases?per_page=30' \
