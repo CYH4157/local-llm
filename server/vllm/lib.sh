@@ -10,6 +10,16 @@ SERVICE=vllm                                # systemd 服務名稱
 # 跟著模型走的設定；埠號、金鑰等其他設定切換模型時不變
 PROFILE_KEYS="SERVE_MODEL|SERVE_NAME|SERVE_MAX_LEN|SERVE_GPU_UTIL|SERVE_TOOL_PARSER|SERVE_EXTRA_ARGS"
 
+# === 測過的版本（實驗室驗證過的組合；要升級改這裡，或 vllmctl upgrade VERSION 先在一台試）===
+#   0.32.0：RTX 5070 Ti（591 驅動）/ RTX 4070（610 驅動）/ H200 NVL（570 驅動，cu129 版）
+#   每台都裝同一版，重跑 setup 不會意外升級；latest = 裝 PyPI 上最新版（未驗證）
+VLLM_VERSION="${VLLM_VERSION:-0.32.0}"
+# 驅動支援 CUDA 13 時的 PyTorch 版本：要跟 vLLM 本身編譯用的 CUDA 一樣（0.32.0 是 13.0）；
+# 不能用 auto，驅動支援 13.2 時 PyTorch 會裝成 cu132、TorchAudio 卻只有 cu130
+VLLM_TORCH_BACKEND="${VLLM_TORCH_BACKEND:-cu130}"
+# 驅動只到 CUDA 12.x（例如 vGPU 的 570 驅動）時，改裝 GitHub release 上的 +cu129 版
+VLLM_TORCH_BACKEND_CU12=cu129
+
 step() { printf '\n\033[36m==== %s ====\033[0m\n' "$1"; }
 ok()   { printf '  \033[32m[OK]\033[0m %s\n' "$1"; }
 warn() { printf '  \033[33m[!]\033[0m  %s\n' "$1"; }

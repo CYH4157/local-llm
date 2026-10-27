@@ -17,6 +17,8 @@
 #    new-key [KEY]            產生新的 API 金鑰（或指定金鑰），舊的立即失效
 #    edit                     用 nano 編輯 vllm.env，存檔後重啟
 #    bench                    跑標準測試（速度、長文件、工具呼叫、五人同時、中文、寫程式）
+#    version                  顯示安裝的 vLLM 版本，和實驗室測過的版本比較
+#    upgrade [VERSION|latest] 換 vLLM 版本（不加 = 換回測過的版本；latest = 最新版，未驗證）
 # =============================================================================
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -223,5 +225,18 @@ case "$cmd" in
         python3 "$HERE/bench.py" "$SERVE_NAME (${SERVE_MAX_LEN})" "$out"
         ok "結果存在 $out"
         ;;
-    *) sed -n '2,20p' "$0"; exit 1 ;;
+    version)
+        cur="$("$APP_DIR/.venv/bin/vllm" --version 2>/dev/null | tail -n1 || true)"
+        torch_cuda="$("$APP_DIR/.venv/bin/python" -c 'import torch; print(torch.__version__)' 2>/dev/null || true)"
+        echo "  安裝的 vLLM：${cur:-讀不到}（PyTorch ${torch_cuda:-讀不到}）"
+        echo "  實驗室測過：$VLLM_VERSION（lib.sh 的 VLLM_VERSION）"
+        [ "${cur%%+*}" = "$VLLM_VERSION" ] || warn "跟測過的版本不同：要換回去執行 vllmctl upgrade $VLLM_VERSION"
+        ;;
+    upgrade)
+        # 換 vLLM 版本：預設換回測過的版本；指定版本號或 latest（未驗證）可以先在一台試，沒問題再改 lib.sh 的 VLLM_VERSION
+        V="${1:-$VLLM_VERSION}"
+        warn "vLLM 換成 $V：會重跑 setup-vllm.sh（沿用目前的模型與金鑰），服務會重啟、約 2~10 分鐘"
+        bash "$HERE/setup-vllm.sh" --vllm-version "$V"
+        ;;
+    *) sed -n '2,22p' "$0"; exit 1 ;;
 esac

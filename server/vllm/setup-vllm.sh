@@ -27,6 +27,7 @@
 #      --key KEY           指定 API 金鑰（預設：沿用舊的，沒有就自動產生）
 #      --hf-token TOKEN    下載需要授權的模型（Llama、Gemma…）時使用
 #      --no-warmup         不預先下載 / 測試模型
+#      --vllm-version V    vLLM 版本（預設：lib.sh 的 VLLM_VERSION，實驗室測過的版本；latest = 最新版，未驗證）
 #
 #  安裝位置：~/vllm-server
 #      .venv/          vLLM 的 Python 環境
@@ -42,7 +43,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/lib.sh"
 
 PRESET="" MODEL="" NAME="" MAX_LEN="" TOOL_PARSER="" EXTRA="" EXTRA_SET=0
-PORT="" HOST="" KEY="" HF_TOKEN_ARG="" WARMUP=1
+PORT="" HOST="" KEY="" HF_TOKEN_ARG="" WARMUP=1 VLLM_VER_ARG=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --preset)      PRESET="$2"; shift 2 ;;
@@ -56,6 +57,7 @@ while [ $# -gt 0 ]; do
         --key)         KEY="$2"; shift 2 ;;
         --hf-token)    HF_TOKEN_ARG="$2"; shift 2 ;;
         --no-warmup)   WARMUP=0; shift ;;
+        --vllm-version) VLLM_VER_ARG="$2"; shift 2 ;;
         -h|--help)     sed -n '2,30p' "$0"; exit 0 ;;
         *) die "不認得的參數：$1（看說明：bash $0 --help）" ;;
     esac
@@ -121,24 +123,36 @@ if [ -z "$DRIVER_CUDA" ]; then
     if [ "${DRIVER_VER%%.*}" -ge 580 ] 2>/dev/null; then DRIVER_CUDA=13; else DRIVER_CUDA=12; fi
 fi
 ok "驅動 ${DRIVER_VER:-未知}，支援 CUDA $DRIVER_CUDA"
+WANT_VER="${VLLM_VER_ARG:-$VLLM_VERSION}"
 if [ "$DRIVER_CUDA" -ge 13 ]; then
-    # 固定 cu130（PyPI 的 vLLM 就是用 CUDA 13.0 編的）：--torch-backend=auto 會照驅動挑最新的 CUDA，
-    # 驅動支援 13.2（例：RTX 4070 + 610 驅動）時 PyTorch 裝成 cu132、TorchAudio 卻只有 cu130 → vLLM 啟動就報 CUDA 版本不一致
+    # PyTorch 固定用 VLLM_TORCH_BACKEND（見 lib.sh），已裝成別的 CUDA 版本就重裝
+    WANT_CUDA="${VLLM_TORCH_BACKEND#cu}"; WANT_CUDA="${WANT_CUDA:0:2}.${WANT_CUDA:2}"    # cu130 → 13.0
     TORCH_CUDA="$("$APP_DIR/.venv/bin/python" -c 'import torch; print(torch.version.cuda or "")' 2>/dev/null || true)"
     REINSTALL=()
-    if [ -n "$TORCH_CUDA" ] && [ "$TORCH_CUDA" != "13.0" ]; then
-        warn "已安裝的 PyTorch 是 CUDA $TORCH_CUDA 版，重裝成 CUDA 13.0 版（跟 vLLM、TorchAudio 一致）"
+    if [ -n "$TORCH_CUDA" ] && [ "$TORCH_CUDA" != "$WANT_CUDA" ]; then
+        warn "已安裝的 PyTorch 是 CUDA $TORCH_CUDA 版，重裝成 CUDA $WANT_CUDA 版（跟 vLLM、TorchAudio 一致）"
         REINSTALL=(--reinstall-package torch --reinstall-package torchaudio --reinstall-package torchvision)
     fi
-    uv pip install --python "$APP_DIR/.venv/bin/python" -U vllm --torch-backend=cu130 "${REINSTALL[@]}"
+    if [ "$WANT_VER" = latest ]; then
+        warn "安裝 PyPI 上最新版 vLLM（未驗證；有問題用 vllmctl upgrade $VLLM_VERSION 換回測過的版本）"
+        SPEC=(-U vllm)
+    else
+        ok "安裝 vLLM $WANT_VER（實驗室測過的版本）"
+        SPEC=("vllm==$WANT_VER")
+    fi
+    uv pip install --python "$APP_DIR/.venv/bin/python" "${SPEC[@]}" --torch-backend="$VLLM_TORCH_BACKEND" "${REINSTALL[@]}"
 else
-    # 不是每一版都有 +cu129 檔案，從最近的正式版往回找第一個有的
-    WHEEL_URL="$(curl -fsSL 'https://api.github.com/repos/vllm-project/vllm/releases?per_page=30' \
-        | jq -r --arg arch "$(uname -m)" '[.[] | select(.prerelease | not) | .assets[]
-            | select(.name | test("\\+cu129-cp38-abi3-manylinux_[0-9_]+_" + $arch + "\\.whl$")) | .browser_download_url][0] // empty')"
-    [ -n "$WHEEL_URL" ] || die "找不到 vLLM 的 CUDA 12.9 版（GitHub API 連不上？）"
+    # GitHub release 上的 +cu129 版：指定版本就找那一版；latest 從最近的正式版往回找第一個有 +cu129 檔案的
+    if [ "$WANT_VER" = latest ]; then
+        API='https://api.github.com/repos/vllm-project/vllm/releases?per_page=30'; SEL='[.[] | select(.prerelease | not) | .assets[]'
+    else
+        API="https://api.github.com/repos/vllm-project/vllm/releases/tags/v$WANT_VER"; SEL='[.assets[]'
+    fi
+    WHEEL_URL="$(curl -fsSL "$API" | jq -r --arg arch "$(uname -m)" "$SEL"'
+            | select(.name | test("\\+cu129-cp38-abi3-manylinux_[0-9_]+_" + $arch + "\\.whl$")) | .browser_download_url][0] // empty' || true)"
+    [ -n "$WHEEL_URL" ] || die "找不到 vLLM $WANT_VER 的 CUDA 12.9 版（GitHub API 連不上？或這一版沒有 +cu129 檔案）"
     warn "驅動只支援到 CUDA $DRIVER_CUDA，改裝 vLLM 的 CUDA 12.9 版：$(basename "$WHEEL_URL")"
-    uv pip install --python "$APP_DIR/.venv/bin/python" -U --torch-backend=cu129 "$WHEEL_URL"
+    uv pip install --python "$APP_DIR/.venv/bin/python" -U --torch-backend="$VLLM_TORCH_BACKEND_CU12" "$WHEEL_URL"
 fi
 "$APP_DIR/.venv/bin/vllm" --version
 ok "vLLM 安裝完成"
