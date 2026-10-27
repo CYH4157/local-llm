@@ -9,6 +9,7 @@ if "%ARGS%"=="" (
 set DISTRO=Ubuntu
 if exist "%~dp0wsl-distro.txt" set /p DISTRO=<"%~dp0wsl-distro.txt"
 rem Copy the scripts next to this file into WSL first, so pulling a new version is enough (no need to rerun setup-host)
-if exist "%~dp0..\vllm\vllmctl.sh" wsl.exe -d %DISTRO% --cd "%~dp0..\vllm" -- bash -c "mkdir -p ~/vllm-opencode-setup && cp *.sh *.py ~/vllm-opencode-setup/ && sed -i 's/\r$//' ~/vllm-opencode-setup/*.sh ~/vllm-opencode-setup/*.py"
+rem Write to a temp folder then mv: replaces the files instead of overwriting them, so a setup-vllm.sh still running is not affected
+if exist "%~dp0..\vllm\vllmctl.sh" wsl.exe -d %DISTRO% --cd "%~dp0..\vllm" -e bash -c "mkdir -p ~/vllm-opencode-setup && t=$(mktemp -d ~/.vllm-sync.XXXXXX) && cp *.sh *.py $t/ && sed -i 's/\r$//' $t/* && mv -f $t/* ~/vllm-opencode-setup/ && rmdir $t"
 wsl.exe -d %DISTRO% --cd ~ -- bash vllm-opencode-setup/vllmctl.sh %ARGS%
 pause
