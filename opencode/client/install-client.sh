@@ -57,8 +57,11 @@ ok "完成"
 
 # --- 2. 測試連線並取得模型清單 ----------------------------------------------
 step "2. 連線測試 $URL"
+CODE="$(curl -sS -m 10 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $KEY" "$URL/models" 2>/dev/null || true)"
+# 401 = 連得到伺服器，只是金鑰被拒；跟連不到分開講，免得去查網路
+[ "$CODE" != 401 ] || die "連得到伺服器，但 API 金鑰不對（401）。你輸入的金鑰有 ${#KEY} 個字元，正確的是 sk-vllm- 加 48 個字元（共 56 個）；請在伺服器上 vllmctl info 整串複製再貼上"
 MODELS_JSON="$(curl -fsS -m 10 -H "Authorization: Bearer $KEY" "$URL/models")" \
-    || die "連不到 $URL/models（服務沒開？IP 變了？不在同一個網路？防火牆？金鑰錯？）"
+    || die "連不到 $URL/models（服務沒開？網址錯？不在同一個網路？防火牆？）"
 if [ -n "$ONLY" ]; then
     # 依 --models 的順序排，第一個就是預設模型
     MODELS_JSON="$(echo "$MODELS_JSON" | jq --arg only "$ONLY" '($only | split(",") | map(ltrimstr(" ") | rtrimstr(" "))) as $w

@@ -203,8 +203,17 @@ Step "1. 測試連線 $Url"
 try {
     $served = Invoke-RestMethod -Uri "$Url/models" -Headers @{ Authorization = "Bearer $Key" } -TimeoutSec 10
 } catch {
-    Write-Host "  連不到 $Url/models ：$($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "  請確認：伺服器有開機、IP 正確、金鑰正確；伺服器要走 VPN 的話，先連上 VPN。" -ForegroundColor Red
+    $status = try { [int]$_.Exception.Response.StatusCode } catch { 0 }
+    if ($status -eq 401) {
+        # 401 = 連得到伺服器，只是金鑰被拒；跟連不到分開講，免得去查網路
+        Write-Host "  連得到伺服器，但 API 金鑰不對（401）。" -ForegroundColor Red
+        Write-Host "  你輸入的金鑰有 $($Key.Length) 個字元，正確的是 sk-vllm- 加 48 個字元（共 56 個）。" -ForegroundColor Red
+        Write-Host "  請在伺服器上執行 vllmctl info，整串複製金鑰再貼上（不要手打）；伺服器執行過 new-key 的話要用新的。" -ForegroundColor Red
+    } else {
+        Write-Host "  連不到 $Url/models ：$($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "  請確認：伺服器有開機、網址正確；伺服器要走 VPN 的話，先連上 VPN。" -ForegroundColor Red
+        Write-Host "  先用瀏覽器開 $Url/models 測試：看到 Unauthorized 代表連得到，問題在金鑰。" -ForegroundColor Red
+    }
     exit 1
 }
 if (-not $served.data) { Write-Host "  伺服器沒有回傳任何模型" -ForegroundColor Red; exit 1 }
