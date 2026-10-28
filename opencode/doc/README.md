@@ -18,6 +18,8 @@
 
 - Windows：雙擊 **`opencode\client\install-client.cmd`**，貼上網址與金鑰 → 開新終端機 → `opencode`
 - Ubuntu：`bash opencode/client/install-client.sh --url http://筆電IP:8000/v1 --key 金鑰 --name laptop`
+- 不連 vLLM、只要 `/slides`、`/pdf2word`、`/official`、`/expense` 等文件指令：Windows 雙擊 **`opencode\client\install-tools.cmd`**；
+  Ubuntu：`bash opencode/client/install-client.sh --tools-only`
 
 **日常管理（筆電）**：雙擊 **`server\wsl2\vllmctl.cmd`**，輸入 `info` / `show` / `logs` / `preset` / `model` / `set` / `new-key` / `bench`
 

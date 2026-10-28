@@ -19,6 +19,8 @@
      -Context      伺服器沒回報上下文長度時使用的值（預設 16384）
      -Label        opencode 裡顯示的 provider 名稱（預設「vLLM (Name)」）
      -SkipTools    不安裝文件工具 labdoc 與 /指令（/slides、/pdf2word、/official…，約 450MB）
+     -ToolsOnly    不連 vLLM，只安裝 opencode、全域規則、文件工具與 /指令（或雙擊 install-tools.cmd）；
+                   模型用 opencode 內建的或自己設定的，之後要連 vLLM 再照一般方式執行即可
 
  也可以連其他 OpenAI 相容的 API，例如國網：寫進 servers.json（範本已有 nchc 一筆），或用 -Url / -Name / -Models 指定
 
@@ -36,7 +38,8 @@ param(
     [int]$Context = 16384,
     [string]$Label,
     [switch]$SkipTools,
-    [switch]$FromList     # 內部用：由 servers.json 逐台呼叫時，不印最後的使用說明、不裝文件工具
+    [switch]$ToolsOnly,
+    [switch]$FromList    # 內部用：由 servers.json 逐台呼叫時，不印最後的使用說明、不裝文件工具
 )
 $ErrorActionPreference = "Stop"
 function Step($m) { Write-Host "`n==== $m ====" -ForegroundColor Cyan }
@@ -54,6 +57,9 @@ function Show-Usage {
     }
     if (Test-Path (Join-Path $env:USERPROFILE ".config\opencode\labdoc\bin\labdoc.exe")) {
         Write-Host "  文件與行政：在 opencode 輸入 / 會列出 /slides 做投影片、/pdf2word、/official 簽呈公文、/expense 核銷…"
+    }
+    if ($ToolsOnly) {
+        Warn "沒有設定 vLLM（-ToolsOnly）：在 opencode 裡輸入 /models 選模型；之後要連 vLLM 再雙擊 install-client.cmd"
     }
 }
 
@@ -150,9 +156,11 @@ function Install-LabTools {
     if ($kept) { Warn "已經有同名的自訂指令，不覆蓋：$($kept -join ', ')" }
 }
 
+if ($ToolsOnly -and $SkipTools) { Write-Host "  -ToolsOnly 和 -SkipTools 不能一起用" -ForegroundColor Red; exit 1 }
+
 # --- 0. servers.json：管理者預先填好的伺服器清單 -----------------------------
 $listPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\servers.json"))   # opencode\servers.json
-if (-not $Url -and -not $FromList -and (Test-Path $listPath)) {
+if (-not $Url -and -not $FromList -and -not $ToolsOnly -and (Test-Path $listPath)) {
     try { $list = Get-Content $listPath -Raw -Encoding UTF8 | ConvertFrom-Json }
     catch { Write-Host "  servers.json 格式不對（常見：少了逗號或引號）：$($_.Exception.Message)" -ForegroundColor Red; exit 1 }
     $servers = @($list.servers | Where-Object { $_ -and $_.enabled -ne $false })
@@ -181,52 +189,56 @@ if (-not $Url -and -not $FromList -and (Test-Path $listPath)) {
     exit $(if ($failed) { 1 } else { 0 })
 }
 
-if (-not $Url) { $Url = Read-Host "筆電的 vLLM 網址（例：http://CYH.local:8000/v1，CYH 換成筆電名稱）" }
-# 在筆電本機安裝（網址是 127.0.0.1 / localhost）且沒給金鑰：直接從 WSL 的 vllm.env 讀，指令裡不必出現金鑰
-if (-not $Key -and $Url -match '://(127\.0\.0\.1|localhost)[:/]') {
-    $distro = "Ubuntu"
-    foreach ($df in (Join-Path $PSScriptRoot "wsl-distro.txt"), (Join-Path $PSScriptRoot "..\..\server\wsl2\wsl-distro.txt")) {
-        if (Test-Path $df) { $distro = (Get-Content $df -Raw).Trim(); break }
+if ($ToolsOnly) {
+    Step "1. 略過 vLLM 連線（-ToolsOnly）"
+} else {
+    if (-not $Url) { $Url = Read-Host "筆電的 vLLM 網址（例：http://CYH.local:8000/v1，CYH 換成筆電名稱）" }
+    # 在筆電本機安裝（網址是 127.0.0.1 / localhost）且沒給金鑰：直接從 WSL 的 vllm.env 讀，指令裡不必出現金鑰
+    if (-not $Key -and $Url -match '://(127\.0\.0\.1|localhost)[:/]') {
+        $distro = "Ubuntu"
+        foreach ($df in (Join-Path $PSScriptRoot "wsl-distro.txt"), (Join-Path $PSScriptRoot "..\..\server\wsl2\wsl-distro.txt")) {
+            if (Test-Path $df) { $distro = (Get-Content $df -Raw).Trim(); break }
+        }
+        $Key = "$(wsl.exe -d $distro -e bash -c '. ~/vllm-server/vllm.env 2>/dev/null; printf %s $SERVE_API_KEY')".Trim()
+        if ($Key) { Write-Host "  已從 WSL（$distro）讀取 API 金鑰" }
     }
-    $Key = "$(wsl.exe -d $distro -e bash -c '. ~/vllm-server/vllm.env 2>/dev/null; printf %s $SERVE_API_KEY')".Trim()
-    if ($Key) { Write-Host "  已從 WSL（$distro）讀取 API 金鑰" }
-}
-if (-not $Key) { $Key = Read-Host "$(if ($Label) { "$Label 的 " })API 金鑰（sk-...）" }
-$Url = $Url.Trim().TrimEnd('/')
-$Key = $Key.Trim()
-if ($Url -notmatch '^https?://') { $Url = "http://$Url" }
-if ($Url -notmatch '/v1$') { $Url = "$Url/v1" }
-if ($Name -notmatch '^[A-Za-z0-9_-]+$') { throw "-Name 只能用英數字、- 和 _" }
+    if (-not $Key) { $Key = Read-Host "$(if ($Label) { "$Label 的 " })API 金鑰（sk-...）" }
+    $Url = $Url.Trim().TrimEnd('/')
+    $Key = $Key.Trim()
+    if ($Url -notmatch '^https?://') { $Url = "http://$Url" }
+    if ($Url -notmatch '/v1$') { $Url = "$Url/v1" }
+    if ($Name -notmatch '^[A-Za-z0-9_-]+$') { throw "-Name 只能用英數字、- 和 _" }
 
-# --- 1. 測試連線 --------------------------------------------------------------
-Step "1. 測試連線 $Url"
-try {
-    $served = Invoke-RestMethod -Uri "$Url/models" -Headers @{ Authorization = "Bearer $Key" } -TimeoutSec 10
-} catch {
-    $status = try { [int]$_.Exception.Response.StatusCode } catch { 0 }
-    if ($status -eq 401) {
-        # 401 = 連得到伺服器，只是金鑰被拒；跟連不到分開講，免得去查網路
-        Write-Host "  連得到伺服器，但 API 金鑰不對（401）。" -ForegroundColor Red
-        Write-Host "  你輸入的金鑰有 $($Key.Length) 個字元，正確的是 sk-vllm- 加 48 個字元（共 56 個）。" -ForegroundColor Red
-        Write-Host "  請在伺服器上執行 vllmctl info，整串複製金鑰再貼上（不要手打）；伺服器執行過 new-key 的話要用新的。" -ForegroundColor Red
-    } else {
-        Write-Host "  連不到 $Url/models ：$($_.Exception.Message)" -ForegroundColor Red
-        Write-Host "  請確認：伺服器有開機、網址正確；伺服器要走 VPN 的話，先連上 VPN。" -ForegroundColor Red
-        Write-Host "  先用瀏覽器開 $Url/models 測試：看到 Unauthorized 代表連得到，問題在金鑰。" -ForegroundColor Red
+    # --- 1. 測試連線 ----------------------------------------------------------
+    Step "1. 測試連線 $Url"
+    try {
+        $served = Invoke-RestMethod -Uri "$Url/models" -Headers @{ Authorization = "Bearer $Key" } -TimeoutSec 10
+    } catch {
+        $status = try { [int]$_.Exception.Response.StatusCode } catch { 0 }
+        if ($status -eq 401) {
+            # 401 = 連得到伺服器，只是金鑰被拒；跟連不到分開講，免得去查網路
+            Write-Host "  連得到伺服器，但 API 金鑰不對（401）。" -ForegroundColor Red
+            Write-Host "  你輸入的金鑰有 $($Key.Length) 個字元，正確的是 sk-vllm- 加 48 個字元（共 56 個）。" -ForegroundColor Red
+            Write-Host "  請在伺服器上執行 vllmctl info，整串複製金鑰再貼上（不要手打）；伺服器執行過 new-key 的話要用新的。" -ForegroundColor Red
+        } else {
+            Write-Host "  連不到 $Url/models ：$($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "  請確認：伺服器有開機、網址正確；伺服器要走 VPN 的話，先連上 VPN。" -ForegroundColor Red
+            Write-Host "  先用瀏覽器開 $Url/models 測試：看到 Unauthorized 代表連得到，問題在金鑰。" -ForegroundColor Red
+        }
+        exit 1
     }
-    exit 1
+    if (-not $served.data) { Write-Host "  伺服器沒有回傳任何模型" -ForegroundColor Red; exit 1 }
+    if ($Models) {
+        $want = @($Models -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        $missing = @($want | Where-Object { $_ -notin $served.data.id })
+        if ($missing) { Warn "伺服器上沒有這些模型，略過：$($missing -join ', ')" }
+        # 依 -Models 的順序排，第一個就是預設模型
+        $served.data = @(foreach ($w in $want) { $served.data | Where-Object { $_.id -eq $w } })
+        if (-not $served.data) { Write-Host "  -Models 指定的模型伺服器上都沒有" -ForegroundColor Red; exit 1 }
+    }
+    foreach ($m in $served.data) { Write-Host "  - $($m.id)  (context $(if ($m.max_model_len) { $m.max_model_len } else { "未回報，用 $Context" }))" }
+    Ok "連線成功"
 }
-if (-not $served.data) { Write-Host "  伺服器沒有回傳任何模型" -ForegroundColor Red; exit 1 }
-if ($Models) {
-    $want = @($Models -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-    $missing = @($want | Where-Object { $_ -notin $served.data.id })
-    if ($missing) { Warn "伺服器上沒有這些模型，略過：$($missing -join ', ')" }
-    # 依 -Models 的順序排，第一個就是預設模型
-    $served.data = @(foreach ($w in $want) { $served.data | Where-Object { $_.id -eq $w } })
-    if (-not $served.data) { Write-Host "  -Models 指定的模型伺服器上都沒有" -ForegroundColor Red; exit 1 }
-}
-foreach ($m in $served.data) { Write-Host "  - $($m.id)  (context $(if ($m.max_model_len) { $m.max_model_len } else { "未回報，用 $Context" }))" }
-Ok "連線成功"
 
 # --- 2. 安裝 opencode ---------------------------------------------------------
 function Update-SessionPath {
@@ -330,57 +342,60 @@ if ($SkipInstall -or -not $Terminal) {
 }
 
 # --- 3. 寫入設定 --------------------------------------------------------------
-Step "3. 寫入 opencode 設定（provider：$Name）"
 $cfgDir  = Join-Path $env:USERPROFILE ".config\opencode"
 $cfgPath = Join-Path $cfgDir "opencode.json"
 New-Item -ItemType Directory -Force -Path $cfgDir | Out-Null
-
-$cfg = $null
-if (Test-Path $cfgPath) {
-    Copy-Item $cfgPath "$cfgPath.bak" -Force
-    try { $cfg = Get-Content $cfgPath -Raw -Encoding UTF8 | ConvertFrom-Json }
-    catch { Warn "舊設定無法解析，已備份成 opencode.json.bak 並重新建立" }
-}
-if (-not $cfg) { $cfg = [pscustomobject]@{ '$schema' = 'https://opencode.ai/config.json' } }
-
-$modelMap = [ordered]@{}
-foreach ($m in $served.data) {
-    $ctx = $Context
-    if ($m.max_model_len) { $ctx = [int]$m.max_model_len }
-    $modelMap[$m.id] = [ordered]@{
-        name      = "$($m.id) ($Name)"
-        tool_call = $true
-        # 輸出上限留在上下文的 1/4 以內，剩下給 opencode 的提示和程式碼
-        limit     = [ordered]@{ context = $ctx; output = [Math]::Min(8192, [int][Math]::Floor($ctx / 4)) }
+if ($ToolsOnly) {
+    Step "3. 略過 opencode 設定（-ToolsOnly，不改 opencode.json）"
+} else {
+    Step "3. 寫入 opencode 設定（provider：$Name）"
+    $cfg = $null
+    if (Test-Path $cfgPath) {
+        Copy-Item $cfgPath "$cfgPath.bak" -Force
+        try { $cfg = Get-Content $cfgPath -Raw -Encoding UTF8 | ConvertFrom-Json }
+        catch { Warn "舊設定無法解析，已備份成 opencode.json.bak 並重新建立" }
     }
-}
-$provider = [ordered]@{
-    npm     = "@ai-sdk/openai-compatible"
-    name    = $(if ($Label) { $Label } else { "vLLM ($Name)" })
-    options = [ordered]@{ baseURL = $Url; apiKey = $Key }
-    models  = $modelMap
-}
-if (-not $cfg.PSObject.Properties['provider']) {
-    $cfg | Add-Member -NotePropertyName provider -NotePropertyValue ([pscustomobject]@{})
-}
-$cfg.provider | Add-Member -NotePropertyName $Name -NotePropertyValue $provider -Force
+    if (-not $cfg) { $cfg = [pscustomobject]@{ '$schema' = 'https://opencode.ai/config.json' } }
 
-$first = "$Name/$($served.data[0].id)"
-# 預設模型若指向這個 provider、但模型已不存在（筆電用 vllmctl 換過模型），自動改成新模型
-$stale = $false
-foreach ($p in 'model', 'small_model') {
-    if ($cfg.PSObject.Properties[$p] -and "$($cfg.$p)" -like "$Name/*" -and
-        -not $modelMap.Contains("$($cfg.$p)".Substring($Name.Length + 1))) { $stale = $true }
+    $modelMap = [ordered]@{}
+    foreach ($m in $served.data) {
+        $ctx = $Context
+        if ($m.max_model_len) { $ctx = [int]$m.max_model_len }
+        $modelMap[$m.id] = [ordered]@{
+            name      = "$($m.id) ($Name)"
+            tool_call = $true
+            # 輸出上限留在上下文的 1/4 以內，剩下給 opencode 的提示和程式碼
+            limit     = [ordered]@{ context = $ctx; output = [Math]::Min(8192, [int][Math]::Floor($ctx / 4)) }
+        }
+    }
+    $provider = [ordered]@{
+        npm     = "@ai-sdk/openai-compatible"
+        name    = $(if ($Label) { $Label } else { "vLLM ($Name)" })
+        options = [ordered]@{ baseURL = $Url; apiKey = $Key }
+        models  = $modelMap
+    }
+    if (-not $cfg.PSObject.Properties['provider']) {
+        $cfg | Add-Member -NotePropertyName provider -NotePropertyValue ([pscustomobject]@{})
+    }
+    $cfg.provider | Add-Member -NotePropertyName $Name -NotePropertyValue $provider -Force
+
+    $first = "$Name/$($served.data[0].id)"
+    # 預設模型若指向這個 provider、但模型已不存在（筆電用 vllmctl 換過模型），自動改成新模型
+    $stale = $false
+    foreach ($p in 'model', 'small_model') {
+        if ($cfg.PSObject.Properties[$p] -and "$($cfg.$p)" -like "$Name/*" -and
+            -not $modelMap.Contains("$($cfg.$p)".Substring($Name.Length + 1))) { $stale = $true }
+    }
+    if ($stale) { Warn "原本的預設模型已不在筆電上，改成 $first" }
+    if ($Default -or $stale -or -not $cfg.PSObject.Properties['model']) {
+        $cfg | Add-Member -NotePropertyName model -NotePropertyValue $first -Force
+        $cfg | Add-Member -NotePropertyName small_model -NotePropertyValue $first -Force
+    }
+    # 存成無 BOM 的 UTF-8
+    [IO.File]::WriteAllText($cfgPath, ($cfg | ConvertTo-Json -Depth 20), (New-Object Text.UTF8Encoding $false))
+    Ok "設定檔：$cfgPath"
+    Ok "預設模型：$($cfg.model)"
 }
-if ($stale) { Warn "原本的預設模型已不在筆電上，改成 $first" }
-if ($Default -or $stale -or -not $cfg.PSObject.Properties['model']) {
-    $cfg | Add-Member -NotePropertyName model -NotePropertyValue $first -Force
-    $cfg | Add-Member -NotePropertyName small_model -NotePropertyValue $first -Force
-}
-# 存成無 BOM 的 UTF-8
-[IO.File]::WriteAllText($cfgPath, ($cfg | ConvertTo-Json -Depth 20), (New-Object Text.UTF8Encoding $false))
-Ok "設定檔：$cfgPath"
-Ok "預設模型：$($cfg.model)"
 
 # --- 4. 全域規則檔 ------------------------------------------------------------
 Step "4. 安裝全域規則（$cfgDir\AGENTS.md）"

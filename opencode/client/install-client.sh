@@ -15,6 +15,10 @@
 #      --context N   伺服器沒回報上下文長度時使用的值（預設 16384）
 #      --label TEXT  opencode 裡顯示的 provider 名稱（預設「vLLM (name)」）
 #      --skip-tools  不安裝文件工具 labdoc 與 /指令（/slides、/pdf2word、/official…，約 450MB）
+#      --tools-only  不連 vLLM，只安裝 opencode、全域規則、文件工具與 /指令（不需要 --url / --key）
+#
+#  只要文件工具、不連 vLLM：
+#      bash install-client.sh --tools-only
 #
 #  可重複執行：會「合併」進 ~/.config/opencode/opencode.json，不會刪掉其他 provider。
 #  金鑰另存在 ~/.config/opencode/keys/<name>.key（權限 600），設定檔裡不放明碼。
@@ -27,7 +31,7 @@ ok()   { printf '  \033[32m[OK]\033[0m %s\n' "$1"; }
 warn() { printf '  \033[33m[!]\033[0m  %s\n' "$1"; }
 die()  { printf '  \033[31m[X]\033[0m  %s\n' "$1" >&2; exit 1; }
 
-URL="" KEY="" PNAME="vllm" MAKE_DEFAULT=0 ONLY="" CTX=16384 LABEL="" SKIP_TOOLS=0
+URL="" KEY="" PNAME="vllm" MAKE_DEFAULT=0 ONLY="" CTX=16384 LABEL="" SKIP_TOOLS=0 TOOLS_ONLY=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --url)     URL="${2%/}"; shift 2 ;;
@@ -38,15 +42,19 @@ while [ $# -gt 0 ]; do
         --context) CTX="$2"; shift 2 ;;
         --label)   LABEL="$2"; shift 2 ;;
         --skip-tools) SKIP_TOOLS=1; shift ;;
-        -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
+        --tools-only) TOOLS_ONLY=1; shift ;;
+        -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
         *) die "不認得的參數：$1" ;;
     esac
 done
 [[ "$PNAME" =~ ^[a-zA-Z0-9_-]+$ ]] || die "--name 只能用英數字、- 和 _"
+[ "$TOOLS_ONLY$SKIP_TOOLS" != 11 ] || die "--tools-only 和 --skip-tools 不能一起用"
 
-[ -n "$URL" ] || die "請用 --url 提供筆電的 vLLM 網址（在筆電雙擊 server\\wsl2\\vllmctl.cmd 輸入 info 可看到）"
-[ -n "$KEY" ] || die "請用 --key 提供 API 金鑰（在筆電雙擊 server\\wsl2\\vllmctl.cmd 輸入 info 可看到）"
-case "$URL" in */v1) ;; *) URL="$URL/v1" ;; esac
+if [ "$TOOLS_ONLY" = 0 ]; then
+    [ -n "$URL" ] || die "請用 --url 提供筆電的 vLLM 網址（在筆電雙擊 server\\wsl2\\vllmctl.cmd 輸入 info 可看到）；不連 vLLM 只裝文件工具請用 --tools-only"
+    [ -n "$KEY" ] || die "請用 --key 提供 API 金鑰（在筆電雙擊 server\\wsl2\\vllmctl.cmd 輸入 info 可看到）"
+    case "$URL" in */v1) ;; *) URL="$URL/v1" ;; esac
+fi
 
 # --- 1. 套件 ----------------------------------------------------------------
 step "1. 必要套件"
@@ -56,20 +64,24 @@ if [ ${#need[@]} -gt 0 ]; then sudo apt-get update -y && sudo apt-get install -y
 ok "完成"
 
 # --- 2. 測試連線並取得模型清單 ----------------------------------------------
-step "2. 連線測試 $URL"
-CODE="$(curl -sS -m 10 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $KEY" "$URL/models" 2>/dev/null || true)"
-# 401 = 連得到伺服器，只是金鑰被拒；跟連不到分開講，免得去查網路
-[ "$CODE" != 401 ] || die "連得到伺服器，但 API 金鑰不對（401）。你輸入的金鑰有 ${#KEY} 個字元，正確的是 sk-vllm- 加 48 個字元（共 56 個）；請在伺服器上 vllmctl info 整串複製再貼上"
-MODELS_JSON="$(curl -fsS -m 10 -H "Authorization: Bearer $KEY" "$URL/models")" \
-    || die "連不到 $URL/models（服務沒開？網址錯？不在同一個網路？防火牆？）"
-if [ -n "$ONLY" ]; then
-    # 依 --models 的順序排，第一個就是預設模型
-    MODELS_JSON="$(echo "$MODELS_JSON" | jq --arg only "$ONLY" '($only | split(",") | map(ltrimstr(" ") | rtrimstr(" "))) as $w
-        | .data |= [$w[] as $id | .[] | select(.id == $id)]')"
-    [ "$(echo "$MODELS_JSON" | jq '.data | length')" -gt 0 ] || die "--models 指定的模型伺服器上都沒有"
+if [ "$TOOLS_ONLY" = 1 ]; then
+    step "2. 略過 vLLM 連線（--tools-only）"
+else
+    step "2. 連線測試 $URL"
+    CODE="$(curl -sS -m 10 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $KEY" "$URL/models" 2>/dev/null || true)"
+    # 401 = 連得到伺服器，只是金鑰被拒；跟連不到分開講，免得去查網路
+    [ "$CODE" != 401 ] || die "連得到伺服器，但 API 金鑰不對（401）。你輸入的金鑰有 ${#KEY} 個字元，正確的是 sk-vllm- 加 48 個字元（共 56 個）；請在伺服器上 vllmctl info 整串複製再貼上"
+    MODELS_JSON="$(curl -fsS -m 10 -H "Authorization: Bearer $KEY" "$URL/models")" \
+        || die "連不到 $URL/models（服務沒開？網址錯？不在同一個網路？防火牆？）"
+    if [ -n "$ONLY" ]; then
+        # 依 --models 的順序排，第一個就是預設模型
+        MODELS_JSON="$(echo "$MODELS_JSON" | jq --arg only "$ONLY" '($only | split(",") | map(ltrimstr(" ") | rtrimstr(" "))) as $w
+            | .data |= [$w[] as $id | .[] | select(.id == $id)]')"
+        [ "$(echo "$MODELS_JSON" | jq '.data | length')" -gt 0 ] || die "--models 指定的模型伺服器上都沒有"
+    fi
+    echo "$MODELS_JSON" | jq -r --arg ctx "$CTX" '.data[] | "  - \(.id)  (context \(.max_model_len // "未回報，用 \($ctx)"))"'
+    ok "連線成功"
 fi
-echo "$MODELS_JSON" | jq -r --arg ctx "$CTX" '.data[] | "  - \(.id)  (context \(.max_model_len // "未回報，用 \($ctx)"))"'
-ok "連線成功"
 
 # --- 3. 安裝 opencode -------------------------------------------------------
 step "3. 安裝 / 更新 opencode"
@@ -88,8 +100,12 @@ if ! grep -q '.opencode/bin' "$HOME/.bashrc" 2>/dev/null; then
 fi
 
 # --- 4. 寫入設定 ------------------------------------------------------------
-step "4. 寫入 ~/.config/opencode/opencode.json（provider：$PNAME）"
 CFG_DIR="$HOME/.config/opencode"
+mkdir -p "$CFG_DIR"
+if [ "$TOOLS_ONLY" = 1 ]; then
+    step "4. 略過 opencode 設定（--tools-only，不改 opencode.json）"
+else
+step "4. 寫入 ~/.config/opencode/opencode.json（provider：$PNAME）"
 mkdir -p "$CFG_DIR/keys"
 ( umask 077; printf '%s' "$KEY" > "$CFG_DIR/keys/$PNAME.key" )
 [ ! -f "$CFG_DIR/opencode.json" ] || cp "$CFG_DIR/opencode.json" "$CFG_DIR/opencode.json.bak"
@@ -135,6 +151,7 @@ print(cfg["model"])
 PY
 )"
 ok "預設模型：$DEFAULT_MODEL"
+fi
 
 # --- 5. 全域規則檔 ----------------------------------------------------------
 step "5. 安裝全域規則（$CFG_DIR/AGENTS.md）"
@@ -199,4 +216,8 @@ fi
 step "opencode 完成"
 echo "  開新終端機（或 source ~/.bashrc），到專案資料夾執行： opencode"
 echo "  在 opencode 裡輸入 /models 可切換 provider / 模型；輸入 / 會列出 /slides、/pdf2word、/official 等文件與行政指令"
-echo "  設定檔：$CFG_DIR/opencode.json（舊版備份在 opencode.json.bak）"
+if [ "$TOOLS_ONLY" = 1 ]; then
+    warn "沒有設定 vLLM（--tools-only）：在 opencode 裡輸入 /models 選模型；之後要連 vLLM 再加 --url / --key 執行本腳本"
+else
+    echo "  設定檔：$CFG_DIR/opencode.json（舊版備份在 opencode.json.bak）"
+fi
