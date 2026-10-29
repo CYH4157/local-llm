@@ -6,3 +6,5 @@
 *.cmd text eol=crlf
 *.md  text
 *.pptx binary
+*.mp3 binary
+*.woff2 binary

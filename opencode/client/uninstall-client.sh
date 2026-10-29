@@ -5,9 +5,9 @@
 #    bash uninstall-client.sh [--name laptop] [--keep-program]
 #
 #  會移除：opencode 設定裡的 provider（預設 laptop）與它的金鑰檔、實驗室共用規則 AGENTS.md、
-#          文件工具 labdoc（~/.config/opencode/labdoc）與實驗室的 /指令、
+#          文件工具 labdoc（~/.config/opencode/labdoc）與實驗室的 /指令、HyperFrames 影片 skill、
 #          ~/.opencode（opencode 程式）與 ~/.bashrc 裡加入的 PATH
-#  不會動：你自己加的其他 provider / 設定、apt 套件
+#  不會動：你自己加的其他 provider / 設定 / skill、apt 套件（含 Node.js、FFmpeg）
 # =============================================================================
 set -euo pipefail
 PNAME="laptop"; KEEP_PROGRAM=0
@@ -62,6 +62,14 @@ for f in "$CFG_DIR"/command/*.md; do
 done
 [ -z "$removed" ] || ok "已刪除指令：$removed"
 rmdir "$CFG_DIR/command" 2>/dev/null || true
+# HyperFrames 影片 skill：只刪實驗室裝的（有 .lab-opencode-skill 標記檔），自己裝的保留
+removed=""
+for d in "$CFG_DIR"/skills/*/; do
+    [ -f "$d.lab-opencode-skill" ] || continue
+    rm -rf "$d"; removed="$removed $(basename "$d")"
+done
+[ -z "$removed" ] || ok "已刪除 skill：$removed（Node.js、FFmpeg 保留；HyperFrames 的 Chrome 在 ~/.cache/hyperframes）"
+rmdir "$CFG_DIR/skills" 2>/dev/null || true
 
 if [ "$KEEP_PROGRAM" = 0 ]; then
     if [ -d "$HOME/.opencode" ]; then rm -rf "$HOME/.opencode"; ok "已刪除 ~/.opencode（opencode 程式）"; fi

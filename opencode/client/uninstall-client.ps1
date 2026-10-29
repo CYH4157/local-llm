@@ -4,8 +4,9 @@
 
  最簡單：雙擊 uninstall-client.cmd。
      會移除：opencode 設定裡的實驗室 provider（預設 laptop）、實驗室共用規則 AGENTS.md、
-             文件工具 labdoc 與實驗室的 /指令、opencode 程式
-     不會動：你自己加的其他 provider / 設定、Scoop 本身（可能裝了其他軟體）
+             文件工具 labdoc 與實驗室的 /指令、HyperFrames 影片 skill、opencode 程式
+     不會動：你自己加的其他 provider / 設定 / skill、Scoop 本身（可能裝了其他軟體）、
+             影片 skill 裝的 Node.js 與 FFmpeg（可能有其他程式在用）
 
  參數：
      -Name laptop     要移除的 provider 名稱，逗號分隔（安裝時的 -Name）；
@@ -86,12 +87,12 @@ if ($providersLeft.Count -gt 0) {
 }
 
 # --- 2b. 文件工具 labdoc 與 /指令（跟共用規則一樣：還有其他伺服器就保留） --------
-Step "2b. 移除文件工具 labdoc 與 /指令"
+Step "2b. 移除文件工具 labdoc、/指令與影片 skill"
 $toolDir = Join-Path $cfgDir "labdoc"
 $binDir  = Join-Path $toolDir "bin"
 $cmdDir  = Join-Path $cfgDir "command"
 if ($providersLeft.Count -gt 0) {
-    Ok "還有其他伺服器（$($providersLeft -join ', ')），保留文件工具與 /指令"
+    Ok "還有其他伺服器（$($providersLeft -join ', ')），保留文件工具、/指令與影片 skill"
 } else {
     if (Test-Path $toolDir) {
         Get-Process labdoc -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -111,6 +112,16 @@ if ($providersLeft.Count -gt 0) {
     $removedCmds | Remove-Item -Force
     if ($removedCmds) { Ok "已刪除指令：$(($removedCmds | ForEach-Object { "/$($_.BaseName)" }) -join ' ')" }
     if ((Test-Path $cmdDir) -and -not (Get-ChildItem $cmdDir -Force)) { Remove-Item $cmdDir -Force }
+    # HyperFrames 影片 skill：只刪實驗室裝的（有 .lab-opencode-skill 標記檔），自己裝的保留
+    $skillDir = Join-Path $cfgDir "skills"
+    $removedSkills = @(Get-ChildItem $skillDir -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path (Join-Path $_.FullName ".lab-opencode-skill") })
+    $removedSkills | Remove-Item -Recurse -Force
+    if ($removedSkills) {
+        Ok "已刪除 skill：$(($removedSkills | ForEach-Object Name) -join ', ')"
+        Ok "Node.js、FFmpeg 可能有其他程式在用，保留；HyperFrames 的 Chrome 在 $env:USERPROFILE\.cache\hyperframes（不需要可自行刪除）"
+    }
+    if ((Test-Path $skillDir) -and -not (Get-ChildItem $skillDir -Force)) { Remove-Item $skillDir -Force }
 }
 if ((Test-Path $cfgDir) -and -not (Get-ChildItem $cfgDir -Force | Where-Object { $_.Name -notlike "*.uninstall-bak" })) {
     Ok "設定資料夾只剩備份檔：$cfgDir（確認不需要後可自行刪除）"

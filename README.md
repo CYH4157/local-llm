@@ -43,7 +43,7 @@ local-llm/
 │  ├─ wsl2/                Windows 主機：雙擊 setup-host.cmd 安裝、vllmctl.cmd 管理、funnel.cmd 校外連線
 │  └─ vllm/                Linux 端的 vLLM 腳本（WSL2 或 Ubuntu 主機直接執行 setup-vllm.sh、vllmctl.sh）
 ├─ opencode/               寫程式、查資料用的 opencode
-│  ├─ client/              同學的電腦：雙擊 install-client.cmd 安裝（含文件工具 labdoc 與 /指令）
+│  ├─ client/              同學的電腦：雙擊 install-client.cmd 安裝（含文件工具 labdoc、/指令，可選 HyperFrames 影片 skill）
 │  ├─ servers.example.json 伺服器清單範本（管理者複製成 servers.json、填好金鑰再發給同學）
 │  └─ doc/                 說明文件（使用教學.md）
 ├─ discord/                Discord bot（問答、產生 PPT / Word / Excel）

@@ -21,6 +21,8 @@
      -SkipTools    不安裝文件工具 labdoc 與 /指令（/slides、/pdf2word、/official…，約 450MB）
      -ToolsOnly    不連 vLLM，只安裝 opencode、全域規則、文件工具與 /指令（或雙擊 install-tools.cmd）；
                    模型用 opencode 內建的或自己設定的，之後要連 vLLM 再照一般方式執行即可
+     -Video        安裝 HyperFrames 影片 skill（用 HTML 做影片）與前置的 Node.js 22+、FFmpeg、Chrome，不再詢問
+     -SkipVideo    不安裝 HyperFrames 影片 skill，不再詢問（兩個都沒給時，開始時會問要不要裝）
 
  也可以連其他 OpenAI 相容的 API，例如國網：寫進 servers.json（範本已有 nchc 一筆），或用 -Url / -Name / -Models 指定
 
@@ -39,14 +41,37 @@ param(
     [string]$Label,
     [switch]$SkipTools,
     [switch]$ToolsOnly,
-    [switch]$FromList    # 內部用：由 servers.json 逐台呼叫時，不印最後的使用說明、不裝文件工具
+    [switch]$Video,
+    [switch]$SkipVideo,
+    [switch]$FromList    # 內部用：由 servers.json 逐台呼叫時，不印最後的使用說明、不裝文件工具與影片 skill
 )
 $ErrorActionPreference = "Stop"
 function Step($m) { Write-Host "`n==== $m ====" -ForegroundColor Cyan }
 function Ok($m)   { Write-Host "  [OK] $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "  [!]  $m" -ForegroundColor Yellow }
 $DesktopExe = Join-Path $env:LOCALAPPDATA "Programs\@opencodedesktop\OpenCode.exe"
+# 桌面版附帶的 opencode-cli.exe（管理背景服務用）；舊版放在安裝資料夾，新版放在 %APPDATA%
+function Find-DesktopCli {
+    $cli = Join-Path (Split-Path $DesktopExe) "resources\opencode-cli.exe"
+    if (Test-Path $cli) { return $cli }
+    Get-ChildItem (Join-Path $env:APPDATA "ai.opencode.desktop\cli") -Recurse -Filter opencode-cli.exe -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
+}
+
+# 桌面版的模型清單來自背景服務（opencode-cli service），關掉視窗它還在跑，
+# 只重開視窗看不到新加的模型 → 服務在跑就重新啟動，讓它重讀 opencode.json
+function Restart-DesktopService {
+    $cli = Find-DesktopCli
+    if (-not $cli) { return }
+    $status = try { "$(& $cli service status 2>$null)" } catch { "" }
+    if ($LASTEXITCODE -ne 0 -or $status -notmatch 'https?://') { return }
+    & $cli service restart 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) { Ok "已重新啟動 opencode 背景服務，新設定的模型才會出現（正在進行的對話會中斷，重新送出即可）" }
+    else { Warn "背景服務重新啟動失敗：請關掉 OpenCode，在工作管理員結束 opencode-cli，再重新開啟" }
+}
+
 function Show-Usage {
+    Restart-DesktopService
     Step "完成"
     if (Test-Path $DesktopExe) {
         Write-Host "  桌面版：開始選單搜尋「OpenCode」開啟 → 開啟你的專案資料夾 → 在模型選單選伺服器與模型"
@@ -58,9 +83,17 @@ function Show-Usage {
     if (Test-Path (Join-Path $env:USERPROFILE ".config\opencode\labdoc\bin\labdoc.exe")) {
         Write-Host "  文件與行政：在 opencode 輸入 / 會列出 /slides 做投影片、/pdf2word、/official 簽呈公文、/expense 核銷…"
     }
+    if (Test-Path (Join-Path $env:USERPROFILE ".config\opencode\skills\hyperframes\.lab-opencode-skill")) {
+        Write-Host "  影片：在 opencode 說「用 hyperframes 做一支 10 秒的片頭」，會用 HyperFrames skill 做成 mp4"
+    }
     if ($ToolsOnly) {
         Warn "沒有設定 vLLM（-ToolsOnly）：在 opencode 裡輸入 /models 選模型；之後要連 vLLM 再雙擊 install-client.cmd"
     }
+}
+
+function Update-SessionPath {
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" +
+                [Environment]::GetEnvironmentVariable("Path", "Machine")
 }
 
 # --- 文件工具 labdoc 與 /指令（每台電腦裝一次，跟連哪台伺服器無關） -------------
@@ -156,7 +189,88 @@ function Install-LabTools {
     if ($kept) { Warn "已經有同名的自訂指令，不覆蓋：$($kept -join ', ')" }
 }
 
+# --- HyperFrames 影片 skill（選用，每台電腦裝一次） -----------------------------
+# skill 放在 repo 的 skills\，複製到全域 skills 資料夾，每個專案都能用；
+# 前置：Node.js 22+（npx hyperframes）、FFmpeg、HyperFrames 固定版本的 Chrome，裝好用 hyperframes doctor 確認
+$VideoSkills = "hyperframes", "hyperframes-cli", "hyperframes-registry", "media-use"
+
+function Get-NodeMajor {
+    $v = try { "$(node -v 2>$null)".Trim() } catch { "" }
+    if ($v -match '^v(\d+)') { [int]$Matches[1] } else { 0 }
+}
+
+# winget（Windows 10/11 內建）優先，沒有才用 Scoop
+function Install-Package($what, $wingetId, $scoopName) {
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host "  安裝 $what（winget）"
+        winget install -e --id $wingetId --silent --accept-source-agreements --accept-package-agreements
+    } elseif (Get-Command scoop -ErrorAction SilentlyContinue) {
+        Write-Host "  安裝 $what（Scoop）"
+        scoop install $scoopName
+    } else {
+        Warn "沒有 winget 也沒有 Scoop，請手動安裝 $what 後重跑本腳本"
+    }
+    Update-SessionPath
+}
+
+function Install-HyperFrames {
+    Step "6. 安裝 HyperFrames 影片 skill"
+    # npx / winget 會寫 stderr；PowerShell 5.1 在 Stop 模式下會把它當成錯誤中斷
+    $ErrorActionPreference = "Continue"
+    $skillDir = Join-Path $env:USERPROFILE ".config\opencode\skills"
+    $installed = @(); $kept = @()
+    foreach ($n in $VideoSkills) {
+        $src = Join-Path $PSScriptRoot "skills\$n"
+        $dst = Join-Path $skillDir $n
+        if (-not (Test-Path (Join-Path $src "SKILL.md"))) { Warn "找不到 $src，略過"; continue }
+        # 自己裝的同名 skill（沒有標記檔）不覆蓋；實驗室裝的整個換新，舊版多出來的檔案才不會留著
+        if ((Test-Path $dst) -and -not (Test-Path (Join-Path $dst ".lab-opencode-skill"))) { $kept += $n; continue }
+        Remove-Item $dst -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Force -Path $skillDir | Out-Null
+        Copy-Item $src $dst -Recurse
+        [IO.File]::WriteAllText((Join-Path $dst ".lab-opencode-skill"), "install-client 安裝；重跑會更新，uninstall-client 會移除`n")
+        $installed += $n
+    }
+    if ($installed) { Ok "已安裝 skill：$($installed -join ', ')（$skillDir）" }
+    if ($kept) { Warn "已經有同名的 skill，不覆蓋：$($kept -join ', ')" }
+
+    if ((Get-NodeMajor) -lt 22) { Install-Package "Node.js LTS（可能會跳出系統管理員確認視窗）" "OpenJS.NodeJS.LTS" "nodejs-lts" }
+    $node = Get-NodeMajor
+    if ($node -lt 22) {
+        Warn "需要 Node.js 22 以上（目前$(if ($node) { " v$node" } else { '沒有安裝' })）：請到 https://nodejs.org 下載 LTS 版安裝後重跑本腳本"
+        return
+    }
+    Ok "Node.js $("$(node -v)".Trim())"
+    if (-not ((Get-Command ffmpeg -ErrorAction SilentlyContinue) -and (Get-Command ffprobe -ErrorAction SilentlyContinue))) {
+        Install-Package "FFmpeg" "Gyan.FFmpeg" "ffmpeg"
+    }
+    Write-Host "  準備 HyperFrames 與它固定版本的 Chrome（第一次約 200MB，請稍候）…"
+    npx -y hyperframes browser ensure
+
+    # doctor --json 一定回傳 0，要看各項的 ok；Docker、配音、轉錄是選用的，不算
+    $need = "Node.js", "FFmpeg", "FFprobe", "Chrome"
+    $doc = try { npx -y hyperframes doctor --json 2>$null | Out-String | ConvertFrom-Json } catch { $null }
+    if (-not $doc.checks) { Warn "hyperframes doctor 沒有回應（常見原因是 npm 被網路擋）；修好後重跑本腳本即可"; return }
+    $checks = @($doc.checks | Where-Object { $_.name -in $need })
+    foreach ($c in $checks) {
+        if ($c.ok) { Ok "$($c.name)：$($c.detail)" }
+        else { Warn "$($c.name)：$($c.detail)$(if ($c.hint) { "（$($c.hint)）" })" }
+    }
+    if ($checks.Count -eq $need.Count -and -not ($checks | Where-Object { -not $_.ok })) {
+        Ok "HyperFrames 可以使用（重開 opencode 後生效）"
+    } else {
+        Warn "HyperFrames 前置軟體沒有全部裝好（看上面的 [!]）；opencode 照樣能用，修好後重跑本腳本即可"
+    }
+}
+
 if ($ToolsOnly -and $SkipTools) { Write-Host "  -ToolsOnly 和 -SkipTools 不能一起用" -ForegroundColor Red; exit 1 }
+if ($Video -and $SkipVideo) { Write-Host "  -Video 和 -SkipVideo 不能一起用" -ForegroundColor Red; exit 1 }
+# 一開始就問，後面安裝時不必有人在旁邊等著回答（servers.json 逐台呼叫時由外層問過了）
+if (-not $FromList -and -not $Video -and -not $SkipVideo) {
+    Write-Host "HyperFrames 影片 skill：讓 opencode 用 HTML 做影片（片頭、動畫、字幕、圖表），輸出 mp4。"
+    Write-Host "會一併安裝 Node.js 22+、FFmpeg 與 HyperFrames 用的 Chrome（約 300MB）。"
+    $Video = "$(Read-Host "要安裝 HyperFrames 影片 skill 嗎？[y/N]")".Trim() -match '^(y|yes|是)$'
+}
 
 # --- 0. servers.json：管理者預先填好的伺服器清單 -----------------------------
 $listPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\servers.json"))   # opencode\servers.json
@@ -185,6 +299,7 @@ if (-not $Url -and -not $FromList -and -not $ToolsOnly -and (Test-Path $listPath
     if ($done)   { Ok "已加入：$($done -join ', ')" }
     if ($failed) { Warn "沒加入：$($failed -join ', ')（看上面的錯誤訊息；修好後再雙擊一次即可）" }
     if ($done -and -not $SkipTools) { Install-LabTools }
+    if ($done -and $Video) { Install-HyperFrames }
     if ($done) { Show-Usage }
     exit $(if ($failed) { 1 } else { 0 })
 }
@@ -241,11 +356,6 @@ if ($ToolsOnly) {
 }
 
 # --- 2. 安裝 opencode ---------------------------------------------------------
-function Update-SessionPath {
-    $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" +
-                [Environment]::GetEnvironmentVariable("Path", "Machine")
-}
-
 # 桌面版：官網的 NSIS 安裝檔（electron-builder），/S 靜默、/currentuser 只裝給目前使用者（不需系統管理員）
 function Install-Desktop {
     if (Test-Path $DesktopExe) { Ok "桌面版已安裝：$DesktopExe"; return $true }
@@ -285,11 +395,7 @@ function Install-Desktop {
 function Repair-DesktopPort {
     $wslcfg = Join-Path $env:USERPROFILE ".wslconfig"
     if (-not ((Test-Path $wslcfg) -and (Select-String -Path $wslcfg -Pattern '^\s*networkingMode\s*=\s*mirrored' -Quiet))) { return }
-    $cli = Join-Path (Split-Path $DesktopExe) "resources\opencode-cli.exe"
-    if (-not (Test-Path $cli)) {
-        $cli = Get-ChildItem (Join-Path $env:APPDATA "ai.opencode.desktop\cli") -Recurse -Filter opencode-cli.exe -ErrorAction SilentlyContinue |
-               Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
-    }
+    $cli = Find-DesktopCli
     if (-not $cli) { Warn "找不到桌面版的 opencode-cli.exe，無法固定 port（遇到 port already in use 時見使用教學 4.3）"; return }
     # 找一個不在 Windows 保留範圍內的 port
     $ranges = @(netsh int ipv4 show excludedportrange protocol=tcp | ForEach-Object {
@@ -412,5 +518,6 @@ if (-not (Test-Path $rulesSrc)) {
 }
 
 if (-not $FromList -and -not $SkipTools) { Install-LabTools }
+if (-not $FromList -and $Video) { Install-HyperFrames }
 if (-not $FromList) { Show-Usage }
 exit 0   # 明確回傳成功：由 servers.json 逐台呼叫時靠 $LASTEXITCODE 判斷

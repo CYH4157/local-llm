@@ -16,6 +16,8 @@
 #      --label TEXT  opencode 裡顯示的 provider 名稱（預設「vLLM (name)」）
 #      --skip-tools  不安裝文件工具 labdoc 與 /指令（/slides、/pdf2word、/official…，約 450MB）
 #      --tools-only  不連 vLLM，只安裝 opencode、全域規則、文件工具與 /指令（不需要 --url / --key）
+#      --video       安裝 HyperFrames 影片 skill（用 HTML 做影片）與前置的 Node.js 22+、FFmpeg、Chrome，不再詢問
+#      --skip-video  不安裝 HyperFrames 影片 skill，不再詢問（兩個都沒給時，開始時會問要不要裝）
 #
 #  只要文件工具、不連 vLLM：
 #      bash install-client.sh --tools-only
@@ -31,7 +33,7 @@ ok()   { printf '  \033[32m[OK]\033[0m %s\n' "$1"; }
 warn() { printf '  \033[33m[!]\033[0m  %s\n' "$1"; }
 die()  { printf '  \033[31m[X]\033[0m  %s\n' "$1" >&2; exit 1; }
 
-URL="" KEY="" PNAME="vllm" MAKE_DEFAULT=0 ONLY="" CTX=16384 LABEL="" SKIP_TOOLS=0 TOOLS_ONLY=0
+URL="" KEY="" PNAME="vllm" MAKE_DEFAULT=0 ONLY="" CTX=16384 LABEL="" SKIP_TOOLS=0 TOOLS_ONLY=0 VIDEO=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --url)     URL="${2%/}"; shift 2 ;;
@@ -43,7 +45,9 @@ while [ $# -gt 0 ]; do
         --label)   LABEL="$2"; shift 2 ;;
         --skip-tools) SKIP_TOOLS=1; shift ;;
         --tools-only) TOOLS_ONLY=1; shift ;;
-        -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+        --video)      [ "$VIDEO" != 0 ] || die "--video 和 --skip-video 不能一起用"; VIDEO=1; shift ;;
+        --skip-video) [ "$VIDEO" != 1 ] || die "--video 和 --skip-video 不能一起用"; VIDEO=0; shift ;;
+        -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
         *) die "不認得的參數：$1" ;;
     esac
 done
@@ -54,6 +58,16 @@ if [ "$TOOLS_ONLY" = 0 ]; then
     [ -n "$URL" ] || die "請用 --url 提供筆電的 vLLM 網址（在筆電雙擊 server\\wsl2\\vllmctl.cmd 輸入 info 可看到）；不連 vLLM 只裝文件工具請用 --tools-only"
     [ -n "$KEY" ] || die "請用 --key 提供 API 金鑰（在筆電雙擊 server\\wsl2\\vllmctl.cmd 輸入 info 可看到）"
     case "$URL" in */v1) ;; *) URL="$URL/v1" ;; esac
+fi
+# 一開始就問，後面安裝時不必有人在旁邊等著回答；不是在終端機執行（沒辦法問）就不裝
+if [ -z "$VIDEO" ]; then
+    VIDEO=0
+    if [ -t 0 ]; then
+        echo "HyperFrames 影片 skill：讓 opencode 用 HTML 做影片（片頭、動畫、字幕、圖表），輸出 mp4。"
+        echo "會一併安裝 Node.js 22+、FFmpeg 與 HyperFrames 用的 Chrome（約 300MB）。"
+        read -rp "要安裝 HyperFrames 影片 skill 嗎？[y/N] " ans
+        case "$ans" in y|Y|yes|YES|是) VIDEO=1 ;; esac
+    fi
 fi
 
 # --- 1. 套件 ----------------------------------------------------------------
@@ -213,9 +227,67 @@ else
     [ -z "$kept" ] || warn "已經有同名的自訂指令，不覆蓋：$kept"
 fi
 
+# --- 7. HyperFrames 影片 skill（選用） ---------------------------------------
+# skill 放在 repo 的 skills/，複製到全域 skills 資料夾，每個專案都能用；
+# 前置：Node.js 22+（npx hyperframes）、FFmpeg、HyperFrames 固定版本的 Chrome，裝好用 hyperframes doctor 確認
+if [ "$VIDEO" = 1 ]; then
+    step "7. 安裝 HyperFrames 影片 skill"
+    SKILL_DIR="$CFG_DIR/skills"
+    mkdir -p "$SKILL_DIR"
+    installed="" kept=""
+    for n in hyperframes hyperframes-cli hyperframes-registry media-use; do
+        src="$HERE/skills/$n" dst="$SKILL_DIR/$n"
+        [ -f "$src/SKILL.md" ] || { warn "找不到 $src，略過"; continue; }
+        # 自己裝的同名 skill（沒有標記檔）不覆蓋；實驗室裝的整個換新，舊版多出來的檔案才不會留著
+        if [ -d "$dst" ] && [ ! -f "$dst/.lab-opencode-skill" ]; then kept="$kept $n"; continue; fi
+        rm -rf "$dst" && cp -r "$src" "$dst"
+        echo "install-client 安裝；重跑會更新，uninstall-client 會移除" > "$dst/.lab-opencode-skill"
+        installed="$installed $n"
+    done
+    [ -z "$installed" ] || ok "已安裝 skill：$installed（$SKILL_DIR）"
+    [ -z "$kept" ] || warn "已經有同名的 skill，不覆蓋：$kept"
+
+    node_major() { node -v 2>/dev/null | sed -n 's/^v\([0-9]*\).*/\1/p'; }
+    NODE_MAJOR="$(node_major)"
+    if [ "${NODE_MAJOR:-0}" -lt 22 ]; then
+        # Ubuntu 內建的 nodejs 常常太舊，改用 NodeSource 的 LTS 版
+        echo "  安裝 Node.js LTS（NodeSource）"
+        { curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - && sudo apt-get install -y nodejs; } ||
+            warn "Node.js 安裝失敗（看上面的錯誤）"
+        NODE_MAJOR="$(node_major)"
+    fi
+    if [ "${NODE_MAJOR:-0}" -lt 22 ]; then
+        warn "需要 Node.js 22 以上（目前 ${NODE_MAJOR:+v}${NODE_MAJOR:-沒有安裝}）：請安裝後重跑本腳本"
+    else
+        ok "Node.js $(node -v)"
+        if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+            sudo apt-get install -y ffmpeg || warn "FFmpeg 安裝失敗（看上面的錯誤）"
+        fi
+        echo "  準備 HyperFrames 與它固定版本的 Chrome（第一次約 200MB，請稍候）…"
+        npx -y hyperframes browser ensure || true
+        # doctor --json 一定回傳 0，要看各項的 ok；Docker、配音、轉錄是選用的，不算
+        NEED='["Node.js","FFmpeg","FFprobe","Chrome"]'
+        DOC="$(npx -y hyperframes doctor --json 2>/dev/null || true)"
+        if echo "$DOC" | jq -e '.checks' >/dev/null 2>&1; then
+            echo "$DOC" | jq -r --argjson need "$NEED" '.checks[] | select(.name as $n | $need | index($n))
+                | "\(if .ok then "ok" else "warn" end)\t\(.name)：\(.detail)\(if .ok or (.hint | not) then "" else "（\(.hint)）" end)"' |
+                while IFS=$'\t' read -r level line; do "$level" "$line"; done
+            if echo "$DOC" | jq -e --argjson need "$NEED" '[.checks[] | select(.name as $n | $need | index($n))] | length == ($need | length) and all(.ok)' >/dev/null; then
+                ok "HyperFrames 可以使用（重開 opencode 後生效）"
+            else
+                warn "HyperFrames 前置軟體沒有全部裝好（看上面的 [!]）；opencode 照樣能用，修好後重跑本腳本即可"
+            fi
+        else
+            warn "hyperframes doctor 沒有回應（常見原因是 npm 被網路擋）；修好後重跑本腳本即可"
+        fi
+    fi
+fi
+
 step "opencode 完成"
 echo "  開新終端機（或 source ~/.bashrc），到專案資料夾執行： opencode"
 echo "  在 opencode 裡輸入 /models 可切換 provider / 模型；輸入 / 會列出 /slides、/pdf2word、/official 等文件與行政指令"
+[ ! -f "$CFG_DIR/skills/hyperframes/.lab-opencode-skill" ] ||
+    echo "  影片：在 opencode 說「用 hyperframes 做一支 10 秒的片頭」，會用 HyperFrames skill 做成 mp4"
 if [ "$TOOLS_ONLY" = 1 ]; then
     warn "沒有設定 vLLM（--tools-only）：在 opencode 裡輸入 /models 選模型；之後要連 vLLM 再加 --url / --key 執行本腳本"
 else
