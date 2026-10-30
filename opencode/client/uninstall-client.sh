@@ -62,7 +62,7 @@ for f in "$CFG_DIR"/command/*.md; do
 done
 [ -z "$removed" ] || ok "已刪除指令：$removed"
 rmdir "$CFG_DIR/command" 2>/dev/null || true
-# HyperFrames 影片 skill：只刪實驗室裝的（有 .lab-opencode-skill 標記檔），自己裝的保留
+# skill：只刪實驗室裝的（有 .lab-opencode-skill 標記檔），自己裝的保留
 removed=""
 for d in "$CFG_DIR"/skills/*/; do
     [ -f "$d.lab-opencode-skill" ] || continue

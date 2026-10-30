@@ -1,7 +1,24 @@
-# opencode skills（HyperFrames 影片）
+# opencode skills
 
-install-client 問「要安裝 HyperFrames 影片 skill 嗎」選 y（或加 `-Video` / `--video`）時，
-這裡每個資料夾會複製到 `~/.config/opencode/skills/<名稱>/`，每個專案都能用。
+install-client 會把這裡選好的資料夾複製到 `~/.config/opencode/skills/<名稱>/`，每個專案都能用。
+uninstall-client 只會刪掉 install-client 裝的（有 `.lab-opencode-skill` 標記檔），自己裝的保留。
+
+## 其他 skill（逐一詢問）
+
+HyperFrames 以外的每個資料夾，install-client 開始時都會顯示 `description` 並逐一問要不要裝。
+不想被問：`-Skills a,b`（`--skills a,b`，`all`＝全部）直接裝，或 `-SkipSkills`（`--skip-skills`）都不裝。
+
+| skill | 用途 |
+|---|---|
+| niar-portal-docs | 在國研院 portal 文件庫找並下載採購表單（如 30 萬元以下點驗及簽認紀錄表） |
+
+新增 skill：建立 `<名稱>/SKILL.md`，開頭 frontmatter 的 `name` 要和資料夾名稱一樣（小寫英數字與 `-`），
+`description` 會顯示在安裝詢問裡；commit 後同學重跑 install-client 就會被問到。
+
+## HyperFrames 影片（一次問整組）
+
+install-client 問「要安裝 HyperFrames 影片 skill 嗎」選 y（或加 `-Video` / `--video`）時安裝下面四個，
+並一併安裝前置軟體。
 
 | skill | 用途 |
 |---|---|

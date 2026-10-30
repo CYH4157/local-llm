@@ -23,6 +23,8 @@
                    模型用 opencode 內建的或自己設定的，之後要連 vLLM 再照一般方式執行即可
      -Video        安裝 HyperFrames 影片 skill（用 HTML 做影片）與前置的 Node.js 22+、FFmpeg、Chrome，不再詢問
      -SkipVideo    不安裝 HyperFrames 影片 skill，不再詢問（兩個都沒給時，開始時會問要不要裝）
+     -Skills       安裝這些其他 skill，逗號分隔（all＝全部），不再詢問，例如 -Skills niar-portal-docs
+     -SkipSkills   不安裝其他 skill，不再詢問（兩個都沒給時，skills\ 裡每個 skill 都會逐一問要不要裝）
 
  也可以連其他 OpenAI 相容的 API，例如國網：寫進 servers.json（範本已有 nchc 一筆），或用 -Url / -Name / -Models 指定
 
@@ -43,6 +45,8 @@ param(
     [switch]$ToolsOnly,
     [switch]$Video,
     [switch]$SkipVideo,
+    [string]$Skills,
+    [switch]$SkipSkills,
     [switch]$FromList    # 內部用：由 servers.json 逐台呼叫時，不印最後的使用說明、不裝文件工具與影片 skill
 )
 $ErrorActionPreference = "Stop"
@@ -213,13 +217,11 @@ function Install-Package($what, $wingetId, $scoopName) {
     Update-SessionPath
 }
 
-function Install-HyperFrames {
-    Step "6. 安裝 HyperFrames 影片 skill"
-    # npx / winget 會寫 stderr；PowerShell 5.1 在 Stop 模式下會把它當成錯誤中斷
-    $ErrorActionPreference = "Continue"
+# 把 repo 的 skills\<名稱> 複製到全域 skills 資料夾
+function Copy-Skills($names) {
     $skillDir = Join-Path $env:USERPROFILE ".config\opencode\skills"
     $installed = @(); $kept = @()
-    foreach ($n in $VideoSkills) {
+    foreach ($n in $names) {
         $src = Join-Path $PSScriptRoot "skills\$n"
         $dst = Join-Path $skillDir $n
         if (-not (Test-Path (Join-Path $src "SKILL.md"))) { Warn "找不到 $src，略過"; continue }
@@ -233,6 +235,13 @@ function Install-HyperFrames {
     }
     if ($installed) { Ok "已安裝 skill：$($installed -join ', ')（$skillDir）" }
     if ($kept) { Warn "已經有同名的 skill，不覆蓋：$($kept -join ', ')" }
+}
+
+function Install-HyperFrames {
+    Step "6. 安裝 HyperFrames 影片 skill"
+    # npx / winget 會寫 stderr；PowerShell 5.1 在 Stop 模式下會把它當成錯誤中斷
+    $ErrorActionPreference = "Continue"
+    Copy-Skills $VideoSkills
 
     if ((Get-NodeMajor) -lt 22) { Install-Package "Node.js LTS（可能會跳出系統管理員確認視窗）" "OpenJS.NodeJS.LTS" "nodejs-lts" }
     $node = Get-NodeMajor
@@ -263,6 +272,25 @@ function Install-HyperFrames {
     }
 }
 
+# --- 其他 skill（選用，每台電腦裝一次） -------------------------------------------
+# skills\ 底下 HyperFrames 以外的資料夾都算；之後新增 skill 放進 skills\，安裝時就會被問到
+$OtherSkills = @(Get-ChildItem (Join-Path $PSScriptRoot "skills") -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -notin $VideoSkills -and (Test-Path (Join-Path $_.FullName "SKILL.md")) } |
+    ForEach-Object Name)
+$PickedSkills = @()
+
+function Get-SkillDescription($n) {
+    $m = Select-String -Path (Join-Path $PSScriptRoot "skills\$n\SKILL.md") -Pattern '^description:\s*(.+)$' -Encoding UTF8 |
+        Select-Object -First 1
+    if ($m) { $m.Matches[0].Groups[1].Value.Trim() } else { "" }
+}
+
+function Install-OtherSkills {
+    if (-not $PickedSkills) { return }
+    Step "7. 安裝其他 skill"
+    Copy-Skills $PickedSkills
+}
+
 if ($ToolsOnly -and $SkipTools) { Write-Host "  -ToolsOnly 和 -SkipTools 不能一起用" -ForegroundColor Red; exit 1 }
 if ($Video -and $SkipVideo) { Write-Host "  -Video 和 -SkipVideo 不能一起用" -ForegroundColor Red; exit 1 }
 # 一開始就問，後面安裝時不必有人在旁邊等著回答（servers.json 逐台呼叫時由外層問過了）
@@ -270,6 +298,15 @@ if (-not $FromList -and -not $Video -and -not $SkipVideo) {
     Write-Host "HyperFrames 影片 skill：讓 opencode 用 HTML 做影片（片頭、動畫、字幕、圖表），輸出 mp4。"
     Write-Host "會一併安裝 Node.js 22+、FFmpeg 與 HyperFrames 用的 Chrome（約 300MB）。"
     $Video = "$(Read-Host "要安裝 HyperFrames 影片 skill 嗎？[y/N]")".Trim() -match '^(y|yes|是)$'
+}
+if ($Skills -and $SkipSkills) { Write-Host "  -Skills 和 -SkipSkills 不能一起用" -ForegroundColor Red; exit 1 }
+if ($Skills) {
+    $PickedSkills = if ($Skills.Trim() -eq "all") { $OtherSkills } else { @($Skills -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+} elseif (-not $FromList -and -not $SkipSkills) {
+    foreach ($n in $OtherSkills) {
+        Write-Host "`nskill $n：$(Get-SkillDescription $n)"
+        if ("$(Read-Host "要安裝 $n 嗎？[y/N]")".Trim() -match '^(y|yes|是)$') { $PickedSkills += $n }
+    }
 }
 
 # --- 0. servers.json：管理者預先填好的伺服器清單 -----------------------------
@@ -300,6 +337,7 @@ if (-not $Url -and -not $FromList -and -not $ToolsOnly -and (Test-Path $listPath
     if ($failed) { Warn "沒加入：$($failed -join ', ')（看上面的錯誤訊息；修好後再雙擊一次即可）" }
     if ($done -and -not $SkipTools) { Install-LabTools }
     if ($done -and $Video) { Install-HyperFrames }
+    if ($done) { Install-OtherSkills }
     if ($done) { Show-Usage }
     exit $(if ($failed) { 1 } else { 0 })
 }
@@ -519,5 +557,6 @@ if (-not (Test-Path $rulesSrc)) {
 
 if (-not $FromList -and -not $SkipTools) { Install-LabTools }
 if (-not $FromList -and $Video) { Install-HyperFrames }
+if (-not $FromList) { Install-OtherSkills }
 if (-not $FromList) { Show-Usage }
 exit 0   # 明確回傳成功：由 servers.json 逐台呼叫時靠 $LASTEXITCODE 判斷

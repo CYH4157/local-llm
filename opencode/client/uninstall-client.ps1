@@ -112,7 +112,7 @@ if ($providersLeft.Count -gt 0) {
     $removedCmds | Remove-Item -Force
     if ($removedCmds) { Ok "已刪除指令：$(($removedCmds | ForEach-Object { "/$($_.BaseName)" }) -join ' ')" }
     if ((Test-Path $cmdDir) -and -not (Get-ChildItem $cmdDir -Force)) { Remove-Item $cmdDir -Force }
-    # HyperFrames 影片 skill：只刪實驗室裝的（有 .lab-opencode-skill 標記檔），自己裝的保留
+    # skill：只刪實驗室裝的（有 .lab-opencode-skill 標記檔），自己裝的保留
     $skillDir = Join-Path $cfgDir "skills"
     $removedSkills = @(Get-ChildItem $skillDir -Directory -ErrorAction SilentlyContinue |
         Where-Object { Test-Path (Join-Path $_.FullName ".lab-opencode-skill") })

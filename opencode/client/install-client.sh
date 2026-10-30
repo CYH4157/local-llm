@@ -18,6 +18,8 @@
 #      --tools-only  不連 vLLM，只安裝 opencode、全域規則、文件工具與 /指令（不需要 --url / --key）
 #      --video       安裝 HyperFrames 影片 skill（用 HTML 做影片）與前置的 Node.js 22+、FFmpeg、Chrome，不再詢問
 #      --skip-video  不安裝 HyperFrames 影片 skill，不再詢問（兩個都沒給時，開始時會問要不要裝）
+#      --skills A,B  安裝這些其他 skill（all＝全部），不再詢問，例如 --skills niar-portal-docs
+#      --skip-skills 不安裝其他 skill，不再詢問（兩個都沒給時，skills/ 裡每個 skill 都會逐一問要不要裝）
 #
 #  只要文件工具、不連 vLLM：
 #      bash install-client.sh --tools-only
@@ -33,7 +35,7 @@ ok()   { printf '  \033[32m[OK]\033[0m %s\n' "$1"; }
 warn() { printf '  \033[33m[!]\033[0m  %s\n' "$1"; }
 die()  { printf '  \033[31m[X]\033[0m  %s\n' "$1" >&2; exit 1; }
 
-URL="" KEY="" PNAME="vllm" MAKE_DEFAULT=0 ONLY="" CTX=16384 LABEL="" SKIP_TOOLS=0 TOOLS_ONLY=0 VIDEO=""
+URL="" KEY="" PNAME="vllm" MAKE_DEFAULT=0 ONLY="" CTX=16384 LABEL="" SKIP_TOOLS=0 TOOLS_ONLY=0 VIDEO="" SKILLS="" SKIP_SKILLS=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --url)     URL="${2%/}"; shift 2 ;;
@@ -47,12 +49,15 @@ while [ $# -gt 0 ]; do
         --tools-only) TOOLS_ONLY=1; shift ;;
         --video)      [ "$VIDEO" != 0 ] || die "--video 和 --skip-video 不能一起用"; VIDEO=1; shift ;;
         --skip-video) [ "$VIDEO" != 1 ] || die "--video 和 --skip-video 不能一起用"; VIDEO=0; shift ;;
-        -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
+        --skills)      SKILLS="$2"; shift 2 ;;
+        --skip-skills) SKIP_SKILLS=1; shift ;;
+        -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
         *) die "不認得的參數：$1" ;;
     esac
 done
 [[ "$PNAME" =~ ^[a-zA-Z0-9_-]+$ ]] || die "--name 只能用英數字、- 和 _"
 [ "$TOOLS_ONLY$SKIP_TOOLS" != 11 ] || die "--tools-only 和 --skip-tools 不能一起用"
+[ -z "$SKILLS" ] || [ "$SKIP_SKILLS" = 0 ] || die "--skills 和 --skip-skills 不能一起用"
 
 if [ "$TOOLS_ONLY" = 0 ]; then
     [ -n "$URL" ] || die "請用 --url 提供筆電的 vLLM 網址（在筆電雙擊 server\\wsl2\\vllmctl.cmd 輸入 info 可看到）；不連 vLLM 只裝文件工具請用 --tools-only"
@@ -68,6 +73,29 @@ if [ -z "$VIDEO" ]; then
         read -rp "要安裝 HyperFrames 影片 skill 嗎？[y/N] " ans
         case "$ans" in y|Y|yes|YES|是) VIDEO=1 ;; esac
     fi
+fi
+# 其他 skill：skills/ 底下 HyperFrames 以外的資料夾都算；之後新增 skill 放進 skills/，安裝時就會被問到
+VIDEO_SKILLS="hyperframes hyperframes-cli hyperframes-registry media-use"
+OTHER_SKILLS=""
+for d in "$HERE"/skills/*/; do
+    n="$(basename "$d")"
+    [ -f "$d/SKILL.md" ] || continue
+    case " $VIDEO_SKILLS " in *" $n "*) continue ;; esac
+    OTHER_SKILLS="$OTHER_SKILLS $n"
+done
+PICKED_SKILLS=""
+if [ "$SKILLS" = all ]; then
+    PICKED_SKILLS="$OTHER_SKILLS"
+elif [ -n "$SKILLS" ]; then
+    PICKED_SKILLS="${SKILLS//,/ }"
+elif [ "$SKIP_SKILLS" = 0 ] && [ -t 0 ]; then
+    for n in $OTHER_SKILLS; do
+        printf '
+skill %s：%s
+' "$n" "$(sed -n 's/^description:[[:space:]]*//p' "$HERE/skills/$n/SKILL.md" | head -1)"
+        read -rp "要安裝 $n 嗎？[y/N] " ans
+        case "$ans" in y|Y|yes|YES|是) PICKED_SKILLS="$PICKED_SKILLS $n" ;; esac
+    done
 fi
 
 # --- 1. 套件 ----------------------------------------------------------------
@@ -227,15 +255,11 @@ else
     [ -z "$kept" ] || warn "已經有同名的自訂指令，不覆蓋：$kept"
 fi
 
-# --- 7. HyperFrames 影片 skill（選用） ---------------------------------------
-# skill 放在 repo 的 skills/，複製到全域 skills 資料夾，每個專案都能用；
-# 前置：Node.js 22+（npx hyperframes）、FFmpeg、HyperFrames 固定版本的 Chrome，裝好用 hyperframes doctor 確認
-if [ "$VIDEO" = 1 ]; then
-    step "7. 安裝 HyperFrames 影片 skill"
-    SKILL_DIR="$CFG_DIR/skills"
+# 把 repo 的 skills/<名稱> 複製到全域 skills 資料夾，每個專案都能用
+copy_skills() {
+    local SKILL_DIR="$CFG_DIR/skills" installed="" kept="" n src dst
     mkdir -p "$SKILL_DIR"
-    installed="" kept=""
-    for n in hyperframes hyperframes-cli hyperframes-registry media-use; do
+    for n in "$@"; do
         src="$HERE/skills/$n" dst="$SKILL_DIR/$n"
         [ -f "$src/SKILL.md" ] || { warn "找不到 $src，略過"; continue; }
         # 自己裝的同名 skill（沒有標記檔）不覆蓋；實驗室裝的整個換新，舊版多出來的檔案才不會留著
@@ -246,6 +270,13 @@ if [ "$VIDEO" = 1 ]; then
     done
     [ -z "$installed" ] || ok "已安裝 skill：$installed（$SKILL_DIR）"
     [ -z "$kept" ] || warn "已經有同名的 skill，不覆蓋：$kept"
+}
+
+# --- 7. HyperFrames 影片 skill（選用） ---------------------------------------
+# 前置：Node.js 22+（npx hyperframes）、FFmpeg、HyperFrames 固定版本的 Chrome，裝好用 hyperframes doctor 確認
+if [ "$VIDEO" = 1 ]; then
+    step "7. 安裝 HyperFrames 影片 skill"
+    copy_skills $VIDEO_SKILLS
 
     node_major() { node -v 2>/dev/null | sed -n 's/^v\([0-9]*\).*/\1/p'; }
     NODE_MAJOR="$(node_major)"
@@ -281,6 +312,12 @@ if [ "$VIDEO" = 1 ]; then
             warn "hyperframes doctor 沒有回應（常見原因是 npm 被網路擋）；修好後重跑本腳本即可"
         fi
     fi
+fi
+
+# --- 8. 其他 skill（選用） ----------------------------------------------------
+if [ -n "${PICKED_SKILLS// /}" ]; then
+    step "8. 安裝其他 skill"
+    copy_skills $PICKED_SKILLS
 fi
 
 step "opencode 完成"

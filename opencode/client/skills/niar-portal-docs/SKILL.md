@@ -1,5 +1,5 @@
 ---
-name: NIAR Portal 文件下載
+name: niar-portal-docs
 description: 在國研院 portal.niar.org.tw 文件庫快速尋找並下載採購表單（如 30 萬元以下點驗及簽認紀錄表）到 D:\claude-code。含已知資料夾與檔案 ID，不必從頭摸索。
 ---
 
