@@ -1,5 +1,5 @@
 ---
-name: niar-portal-docs
+name: NIAR Portal 文件下載
 description: 在國研院 portal.niar.org.tw 文件庫快速尋找並下載採購表單（如 30 萬元以下點驗及簽認紀錄表）到 D:\claude-code。含已知資料夾與檔案 ID，不必從頭摸索。
 ---
 
@@ -26,13 +26,27 @@ description: 在國研院 portal.niar.org.tw 文件庫快速尋找並下載採�
 
 資料夾樹：`行政 (1534059)` → `1.請採購 (1534085)` → `2.請購表單 (1729502)`
 
-已知 fileEntryId（30 萬以下表單都在 `2.請採購` 資料夾）：
+`2.請購表單 (1729502)` 完整清單（15 筆）：
 
 | 檔名 | fileEntryId |
 |---|---|
-| 07.點驗及簽認紀錄表(30萬以下).docx | 4024948 |
 | 01.30萬以下自辦採購說明 | 4696323 |
-| 06.查驗測試紀錄表(30萬以上) | 1537998 |
+| 02.投標廠商規格審查表 | 1729516 |
+| 03.招標規範文件自我檢核表 | 2279570 |
+| 04.預估金額分析表 | 1729548 |
+| 05.請購異動單 | 1534223 |
+| 06.查驗測試紀錄表(30萬以上)（原版 .doc 254 KB，OLE2 格式） | 1537998 |
+| 07.點驗及簽認紀錄表(30萬以下).docx | 4024948 |
+| 08.共同約商比較表 | 1798538 |
+| 09.政府採購預公告表格 | 1887444 |
+| 10.科研投標廠商評審須知 | 4776458 |
+| 11.廠商公司保密承諾書 | 3529280 |
+| 12.廠商個人保密承諾書 | 3529302 |
+| 13.保固服務確認單 | 6860661 |
+| 14.公開徵求 | 7056975 |
+| 15.鋰離子電池及儲能系統設備安全與作業指引 | 7164177 |
+
+`1.請採購 (1534085)` 子資料夾：`1.招標規範範例 (1733470)`、`2.請購表單 (1729502)`、`3.採購文件 (1729507)`、`4.資安需求範本 (6341769)`；`行政 (1534059)` 另有 2.出納、3.文書、4.財產。根目錄 8 個頂層資料夾：計畫管理 (7436156)、業務推廣組 (6657094)、內部網路服務 (6535741)、機房維運中心 (1360459)、辦公室資訊服務 (1360441)、行政 (1534059)、人事文件 (486033)、環安衛文件 (486017)。
 
 fileEntryId 可能因檔案更新而改版失效；失效時走第 3 節的資料夾瀏覽，從 `2.請購表單 (1729502)` 重新找 ID 並更新此表。
 
@@ -40,8 +54,7 @@ fileEntryId 可能因檔案更新而改版失效；失效時走第 3 節的資�
 
 - 瀏覽資料夾：
   `https://portal.niar.org.tw/web/nchc/docmanage?p_p_id=com_liferay_document_library_web_portlet_DLPortlet&_com_liferay_document_library_web_portlet_DLPortlet_folderId={folderId}`
-- 檢視單一檔案（含下載按鈕）：同上 URL 再加
-  `&_com_liferay_document_library_web_portlet_DLPortlet_mvcRenderCommandName=%2Fdocument_library%2Fview_file_entry&_com_liferay_document_library_web_portlet_DLPortlet_fileEntryId={fileEntryId}`
+- 檢視單一檔案（含下載按鈕）：**不要直接導覽 view_file_entry URL**（手組的 URL 缺少 redirect 參數會失敗）。做法：先用資料夾 URL 開列表，等 React 渲染後用 `evaluate` 找到含目標檔名的 `<a>`（href 含 `view_file_entry`）並 `.click()` 進入。
 - 下載連結形式（點檔案頁的下載按鈕取得，不用手組）：
   `https://portal.niar.org.tw/documents/11130/{folderId}/{檔名}/{uuid}?t={ts}&download=true`
 
