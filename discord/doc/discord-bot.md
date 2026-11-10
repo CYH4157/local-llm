@@ -25,7 +25,7 @@ Windows 筆電
 
 ## 安裝
 
-bot 跟 vLLM **跑在同一台**，金鑰自動讀那台的 `~/vllm-server/vllm.env`，`.env` 不用放金鑰。
+模型來源有兩種：**(A) 本地 vLLM**——bot 跟 vLLM **跑在同一台**，金鑰自動讀那台的 `~/vllm-server/vllm.env`，`.env` 不用放金鑰（下面 2A / 2B）；**(B) 遠端 gateway**——接外部 **OpenAI 相容**服務（例如國網 NCHC genai），不用自架 vLLM（下面 2C）。
 
 | 主機 | vLLM 怎麼架 | bot 怎麼裝 | 常駐方式 |
 |------|------|------|------|
@@ -66,6 +66,8 @@ bash discord/client/deploy.sh --token <Discord_bot_token>
 不想把 token 放在指令列（會留在 shell 歷史紀錄）：先執行 `bash discord/client/deploy.sh`，再 `nano discord/client/.env` 填
 `DISCORD_BOT_TOKEN=`，最後 `sudo systemctl restart discord-bot`。
 
+其他選項（兩種模式都適用）：`--channel <頻道ID>` 只在該頻道自動回一般聊天、`--model <名稱>` 指定模型；`bash discord/client/deploy.sh --help` 看完整用法。
+
 | 日常管理 | 指令 |
 |------|------|
 | 狀態 | `sudo systemctl status discord-bot` |
@@ -92,6 +94,26 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 - 測試：雙擊 `discord\client\start-bot.bat`
 - 正式：以**系統管理員**執行 `install-autostart.ps1`，登入時自動啟動 bot，掛掉也會自動重啟。WSL 常駐由 opencode 專案的 `vLLM-WSL-KeepAlive` 排程負責
 
+### 2C. 接遠端 gateway（不自架 vLLM）
+
+bot 不一定要配本機 vLLM，也能接任何 **OpenAI 相容**的服務（例如國網 NCHC genai）。用 `deploy.sh` 的 `--remote` 指定網址、`--api-key` 指定金鑰，**不需要 `server/vllm` 那一套**：
+
+```bash
+cd ~/local-llm && git pull
+bash discord/client/deploy.sh \
+  --remote https://inner-medusa.genai.nchc.org.tw/v1 \
+  --api-key <API_KEY> \
+  --channel <頻道ID> \
+  --token <Discord_bot_token>
+```
+
+- `--remote <URL>`：OpenAI 相容服務的 base URL（結尾 `/v1`）。
+- `--api-key <KEY>`：該服務的金鑰。不想留在 shell 歷史紀錄就省略，裝完 `nano discord/client/.env` 填 `LLM_API_KEY`，再 `sudo systemctl restart discord-bot`。
+- `--model <名稱>`：gateway 掛多個模型時指定要用哪個（不指定＝清單第一個）。先查有哪些：`curl -s <URL>/models -H "Authorization: Bearer <KEY>" | python3 -m json.tool`。
+- `--channel <頻道ID>`：只在這個頻道自動回一般聊天（見下方 `ALLOWED_CHANNEL_ID`）。
+
+systemd 服務與日常管理指令跟 2A 相同（`systemctl` / `journalctl`）。不加 `--remote` 就是本地 vLLM（預設）。
+
 ---
 
 ## Bot 指令
@@ -105,7 +127,8 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 | `!word 報告 <主題>` | 課堂報告 .docx |
 | `!word <需求>` | 一般文件 .docx |
 | `!excel <需求>` | Excel 表格 .xlsx（可含公式，如預算表的小計和總計） |
-| `!model` | 查看目前的模型（和 opencode 共用） |
+| `!models` | 列出模型服務上可用的模型 |
+| `!model [名稱\|auto]` | 不加參數＝看目前；加名稱＝切換模型（本次執行有效，重啟回預設）；`auto`＝回預設 |
 | `!reset` | 清空此頻道記憶 |
 | `!help` | 說明 |
 
@@ -123,21 +146,24 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 bot 會自動讀主機的金鑰（Ubuntu 直接讀 `~/vllm-server/vllm.env`、Windows 從 WSL 讀）、自動使用 vLLM 目前的模型，所以主機換金鑰或換模型後**都不用改 bot 的設定**。
 怎麼取得 / 更換金鑰、怎麼換模型並套進 opencode，請看 [完整步驟.md 第 5 章](../../完整步驟.md#5-日常管理管理者)。
 
+**接遠端 gateway 時**：金鑰填在 `.env` 的 `LLM_API_KEY`（或 `deploy.sh --api-key`）；要指定模型用 `.env` 的 `LLM_MODEL`（或 `--model`）。在 Discord 也能用 `!models` 看清單、`!model <名稱>` 當場切換（本次執行有效，重啟後回到 `.env` 的 `LLM_MODEL`）。
+
 ---
 
 ## 設定（`.env`）
 
 | 變數 | 說明 |
 |------|------|
-| `LLM_BASE_URL` | vLLM 位址，預設 `http://127.0.0.1:8000/v1`（deploy.ps1 / deploy.sh 自動填） |
+| `LLM_BASE_URL` | 模型服務位址，預設 `http://127.0.0.1:8000/v1`（deploy.sh / deploy.ps1 自動填；接遠端 gateway 用 `--remote` 設成外部網址） |
 | `WSL_DISTRO` | 只有 Windows 用：vLLM 所在的 WSL 發行版（deploy.ps1 自動填） |
-| `LLM_API_KEY` | 留空 = 自動讀主機的 vllm.env（建議）；bot 跟 vLLM 不在同一台時才填 |
+| `LLM_API_KEY` | 留空 = 自動讀主機的 vllm.env（建議，本地 vLLM）；**接遠端 gateway 時要填**該服務金鑰 |
+| `LLM_MODEL` | 指定模型名稱；留空＝自動用 `/v1/models` 第一個（本地 vLLM 建議留空）；多模型 gateway 填要用的那個 |
 | `SYSTEM_PROMPT` | bot 個性 |
 | `MAX_HISTORY` / `HISTORY_MAX_CHARS` | 對話記憶則數和總字數上限 |
 | `REF_MAX_CHARS` | 附件參考資料字數上限 |
 | `TO_TRADITIONAL` | 自動簡轉繁（1/0） |
 | `DOC_FONT_EA` / `DOC_FONT_LATIN` / `PPT_FONT` | 文件字型 |
-| `ALLOWED_CHANNEL_ID` | 限定一般聊天的頻道 |
+| `ALLOWED_CHANNEL_ID` | 只在這個頻道 ID 自動回一般聊天（留空＝每個頻道都回，較吵；@bot／私訊／`!` 指令一律會回）。可用 `deploy.sh --channel` 設定 |
 | `SEARCH_ENGINE` / `GOOGLE_API_KEY` / `GOOGLE_CSE_ID` | 聯網搜尋（沒設定時會自動改用 DuckDuckGo） |
 
 ## 疑難排解
@@ -146,6 +172,8 @@ bot 會自動讀主機的金鑰（Ubuntu 直接讀 `~/vllm-server/vllm.env`、Wi
 |------|------|
 | Discord 顯示「連不上 vLLM」 | 主機執行 `vllmctl status`（Windows：雙擊 `server\wsl2\vllmctl.cmd`；Ubuntu：`bash ~/local-llm/server/vllm/vllmctl.sh status`）；沒在跑就 `start` |
 | bot 沒上線（Ubuntu） | `journalctl -u discord-bot -n 30`：`LoginFailure` = token 貼錯；`PrivilegedIntentsRequired` = 沒開 MESSAGE CONTENT INTENT |
+| 回答出現 `404` / 找不到模型 | `LLM_MODEL` 或 `!model` 指定的名稱在服務上不存在；用 `!models` 查正確名稱 |
+| 接遠端 gateway 連不上 | 檢查 `.env` 的 `LLM_BASE_URL` / `LLM_API_KEY`；用 `curl -s <URL>/models -H "Authorization: Bearer <KEY>"` 測試 |
 | 每則訊息被回兩次 | 兩台主機用了同一個 token：各建一個 Application，或停掉其中一台 |
 | 顯示「API 金鑰錯誤」 | `.env` 的 `LLM_API_KEY` 清空，重啟 bot |
 | 顯示「內容太長」 | `!reset` 清記憶，或縮短附件；常發生就調小 `REF_MAX_CHARS` |
