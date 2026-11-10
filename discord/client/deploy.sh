@@ -22,7 +22,7 @@
 #      bash deploy.sh --remote <URL> --api-key <KEY> --token <TOKEN>
 #          例：--remote https://inner-medusa.genai.nchc.org.tw/v1 --api-key sk-xxxx
 #      bash deploy.sh --remote <URL> --api-key <KEY> --model <模型名> --token <TOKEN>
-#          gateway 掛多個模型時，用 --model 指定要用哪個（不指定=清單第一個）
+#          gateway 掛多個模型時，用 --model 指定要用哪個（不指定＝沿用 .env 現值；新裝為空＝清單第一個）
 #    【共用】
 #      --channel <ID>  只在這個頻道自動回一般聊天（其他頻道要 @bot/私訊；留空=每個頻道都回，較吵）
 #      --no-service    不註冊 systemd 服務（手動執行：.venv/bin/python discord_bot.py）
@@ -123,9 +123,10 @@ fi
 chmod 600 "$ENV_BOT"    # 裡面有 Discord token
 set_bot_env LLM_BASE_URL "$BASE_URL"
 if [ -n "$REMOTE_URL" ]; then
-    [ -z "$REMOTE_KEY" ] || set_bot_env LLM_API_KEY "$REMOTE_KEY"
-    set_bot_env LLM_MODEL "$REMOTE_MODEL"
-    ok "遠端模式：LLM_BASE_URL=$BASE_URL、LLM_MODEL=${REMOTE_MODEL:-（自動選第一個）}"
+    [ -z "$REMOTE_KEY" ]   || set_bot_env LLM_API_KEY "$REMOTE_KEY"
+    [ -z "$REMOTE_MODEL" ] || set_bot_env LLM_MODEL "$REMOTE_MODEL"   # 沒給 --model 就不動 .env 既有的 LLM_MODEL
+    cur_model="$(sed -n 's/^LLM_MODEL=//p' "$ENV_BOT" | head -n1)"
+    ok "遠端模式：LLM_BASE_URL=$BASE_URL、LLM_MODEL=${cur_model:-（空＝自動選清單第一個）}"
     [ -n "$REMOTE_KEY" ] || warn "LLM_API_KEY 尚未設定：請編輯 .env 填入金鑰再 restart"
 else
     set_bot_env LLM_API_KEY ""

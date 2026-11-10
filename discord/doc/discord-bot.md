@@ -111,7 +111,7 @@ bash discord/client/deploy.sh \
 
 - `--remote <URL>`：OpenAI 相容服務的 base URL（結尾 `/v1`）。
 - `--api-key <KEY>`：該服務的金鑰。不想留在 shell 歷史紀錄就省略，裝完 `nano discord/client/.env` 填 `LLM_API_KEY`，再 `sudo systemctl restart discord-bot`。
-- `--model <名稱>`：gateway 掛多個模型時指定要用哪個（**強烈建議指定**；不指定＝清單第一個，可能抓到語音/OCR 等非聊天模型）。怎麼查見下方。
+- `--model <名稱>`：gateway 掛多個模型時指定要用哪個（**強烈建議指定**；不指定＝沿用 `.env` 現值，新裝時為空＝清單第一個，可能抓到語音/OCR 等非聊天模型）。怎麼查見下方。
 - `--channel <頻道ID>`：只在這個頻道自動回一般聊天（見下方 `ALLOWED_CHANNEL_ID`）。
 
 systemd 服務與日常管理指令跟 2A 相同（`systemctl` / `journalctl`）。不加 `--remote` 就是本地 vLLM（預設）。
