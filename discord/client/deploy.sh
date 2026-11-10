@@ -3,19 +3,31 @@
 #  deploy.sh — Ubuntu 伺服器（例如 H200）部署 Discord bot，跟 vLLM 跑在同一台
 #  （Windows 筆電請改用同資料夾的 deploy.ps1）
 #
-#  前提：已經用 server/vllm/setup-vllm.sh 架好 vLLM（~/vllm-server/vllm.env）
+#  兩種模型來源（擇一）：
+#    A.【本地 vLLM】bot 跟 vLLM 跑在同一台（預設）。前提：已用 server/vllm/setup-vllm.sh
+#       架好 vLLM（~/vllm-server/vllm.env），金鑰自動讀該檔，.env 不放金鑰。
+#    B.【遠端 gateway】接外部 OpenAI 相容服務（例如 NCHC genai）。用 --remote 指定網址、
+#       --api-key 指定金鑰，不需要本機 vLLM。
 #  做的事：
-#      1. 確認 vLLM 正常（金鑰直接讀 ~/vllm-server/vllm.env，.env 不放金鑰）
+#      1. 確認模型服務正常（本地 vLLM 或遠端 gateway）
 #      2. 建立 bot 的 Python 環境（.venv）
 #      3. 產生 / 更新 .env
 #      4. 註冊 systemd 服務 discord-bot：開機自動啟動、掛掉 10 秒後自動重啟
 #
 #  用法：
-#      bash deploy.sh                    # 第一次：裝好後把 token 填進 .env，再執行 sudo systemctl restart discord-bot
-#      bash deploy.sh --token <TOKEN>    # 直接填 Discord bot token 並啟動
-#                                        # （Developer Portal → Bot → Reset Token；不是 vLLM 的 sk-vllm- 金鑰）
-#      bash deploy.sh --no-service       # 不註冊服務（手動執行：.venv/bin/python discord_bot.py）
-#      bash deploy.sh --uninstall        # 停止並移除服務（.env 與 .venv 保留）
+#    【本地 vLLM】
+#      bash deploy.sh --token <TOKEN>     直接填 Discord token 並啟動
+#      bash deploy.sh                     先裝好，之後把 token 填進 .env 再 restart
+#    【遠端 gateway】
+#      bash deploy.sh --remote <URL> --api-key <KEY> --token <TOKEN>
+#          例：--remote https://inner-medusa.genai.nchc.org.tw/v1 --api-key sk-xxxx
+#      bash deploy.sh --remote <URL> --api-key <KEY> --model <模型名> --token <TOKEN>
+#          gateway 掛多個模型時，用 --model 指定要用哪個（不指定=清單第一個）
+#    【共用】
+#      --channel <ID>  只在這個頻道自動回一般聊天（其他頻道要 @bot/私訊；留空=每個頻道都回，較吵）
+#      --no-service    不註冊 systemd 服務（手動執行：.venv/bin/python discord_bot.py）
+#      --uninstall     停止並移除服務（.env 與 .venv 保留）
+#      （Discord token：Developer Portal → Bot → Reset Token；不是 LLM 的 sk- 金鑰）
 #
 #  日常管理：
 #      sudo systemctl status discord-bot     狀態
@@ -30,13 +42,17 @@ REPO="$(cd "$HERE/../.." && pwd)"
 BOT_SERVICE=discord-bot
 UNIT="/etc/systemd/system/$BOT_SERVICE.service"
 
-TOKEN="" SERVICE_ON=1 UNINSTALL=0
+TOKEN="" SERVICE_ON=1 UNINSTALL=0 REMOTE_URL="" REMOTE_KEY="" REMOTE_MODEL="" CHANNEL_ID=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --token)      TOKEN="$2"; shift 2 ;;
+        --remote)     REMOTE_URL="$2"; shift 2 ;;
+        --api-key)    REMOTE_KEY="$2"; shift 2 ;;
+        --model)      REMOTE_MODEL="$2"; shift 2 ;;
+        --channel)    CHANNEL_ID="$2"; shift 2 ;;
         --no-service) SERVICE_ON=0; shift ;;
         --uninstall)  UNINSTALL=1; shift ;;
-        -h|--help)    sed -n '2,25p' "$0"; exit 0 ;;
+        -h|--help)    awk 'NR>1 && /^set -euo/{exit} NR>1' "$0"; exit 0 ;;
         *) die "不認得的參數：$1（看說明：bash $0 --help）" ;;
     esac
 done
@@ -51,14 +67,27 @@ if [ "$UNINSTALL" = 1 ]; then
     exit 0
 fi
 
-# --- 1. 確認 vLLM -------------------------------------------------------------
-step "1. 檢查同一台的 vLLM"
-load_env    # 讀 ~/vllm-server/vllm.env（找不到會提示先跑 setup-vllm.sh）
-BASE_URL="http://127.0.0.1:${SERVE_PORT:-8000}/v1"
-if MODELS="$(curl -fsS -m 10 -H "Authorization: Bearer $SERVE_API_KEY" "$BASE_URL/models" 2>/dev/null)"; then
-    ok "vLLM 正常：$(echo "$MODELS" | python3 -c 'import json,sys; m=json.load(sys.stdin)["data"][0]; print(m["id"], "（上下文", m.get("max_model_len"), "）")')  $BASE_URL"
+# --- 1. 確認模型服務 ----------------------------------------------------------
+if [ -n "$REMOTE_URL" ]; then
+    step "1. 檢查遠端模型服務（OpenAI 相容 gateway）"
+    BASE_URL="${REMOTE_URL%/}"; case "$BASE_URL" in */v1) ;; *) BASE_URL="$BASE_URL/v1" ;; esac
+    if [ -z "$REMOTE_KEY" ]; then
+        warn "沒給 --api-key：跳過連線測試。記得之後把金鑰填進 .env 的 LLM_API_KEY 再 restart"
+    elif MODELS="$(curl -fsS -m 10 -H "Authorization: Bearer $REMOTE_KEY" "$BASE_URL/models" 2>/dev/null)"; then
+        ok "遠端服務正常：$(echo "$MODELS" | python3 -c 'import json,sys; d=json.load(sys.stdin)["data"]; print("、".join(m["id"] for m in d[:5]) + ("…" if len(d)>5 else ""))')  $BASE_URL"
+        [ -n "$REMOTE_MODEL" ] || warn "未指定 --model：bot 會用清單第一個模型；要指定請加 --model <模型名>（或之後改 .env 的 LLM_MODEL）"
+    else
+        warn "遠端服務連不上或金鑰有誤（$BASE_URL）：設定照樣完成，bot 啟動後會自動重試"
+    fi
 else
-    warn "vLLM 目前沒有回應：設定照樣完成，bot 啟動後會自動重試（檢查：bash $REPO/server/vllm/vllmctl.sh status）"
+    step "1. 檢查同一台的 vLLM"
+    load_env    # 讀 ~/vllm-server/vllm.env（找不到會提示先跑 setup-vllm.sh）
+    BASE_URL="http://127.0.0.1:${SERVE_PORT:-8000}/v1"
+    if MODELS="$(curl -fsS -m 10 -H "Authorization: Bearer $SERVE_API_KEY" "$BASE_URL/models" 2>/dev/null)"; then
+        ok "vLLM 正常：$(echo "$MODELS" | python3 -c 'import json,sys; m=json.load(sys.stdin)["data"][0]; print(m["id"], "（上下文", m.get("max_model_len"), "）")')  $BASE_URL"
+    else
+        warn "vLLM 目前沒有回應：設定照樣完成，bot 啟動後會自動重試（檢查：bash $REPO/server/vllm/vllmctl.sh status）"
+    fi
 fi
 
 # --- 2. Python 環境 ------------------------------------------------------------
@@ -93,9 +122,17 @@ else
 fi
 chmod 600 "$ENV_BOT"    # 裡面有 Discord token
 set_bot_env LLM_BASE_URL "$BASE_URL"
-set_bot_env LLM_API_KEY ""
+if [ -n "$REMOTE_URL" ]; then
+    [ -z "$REMOTE_KEY" ] || set_bot_env LLM_API_KEY "$REMOTE_KEY"
+    set_bot_env LLM_MODEL "$REMOTE_MODEL"
+    ok "遠端模式：LLM_BASE_URL=$BASE_URL、LLM_MODEL=${REMOTE_MODEL:-（自動選第一個）}"
+    [ -n "$REMOTE_KEY" ] || warn "LLM_API_KEY 尚未設定：請編輯 .env 填入金鑰再 restart"
+else
+    set_bot_env LLM_API_KEY ""
+    ok "LLM_BASE_URL=$BASE_URL、LLM_API_KEY 留空（自動讀 ~/vllm-server/vllm.env，換金鑰也不用改）"
+fi
 [ -z "$TOKEN" ] || set_bot_env DISCORD_BOT_TOKEN "$TOKEN"
-ok "LLM_BASE_URL=$BASE_URL、LLM_API_KEY 留空（自動讀 ~/vllm-server/vllm.env，換金鑰也不用改）"
+[ -z "$CHANNEL_ID" ] || { set_bot_env ALLOWED_CHANNEL_ID "$CHANNEL_ID"; ok "ALLOWED_CHANNEL_ID=$CHANNEL_ID（只在這個頻道自動回，其他頻道要 @bot/私訊）"; }
 HAS_TOKEN=1
 grep -qE '^DISCORD_BOT_TOKEN=.{20,}$' "$ENV_BOT" && ! grep -q '^DISCORD_BOT_TOKEN=貼上' "$ENV_BOT" || HAS_TOKEN=0
 
@@ -105,10 +142,17 @@ if [ "$SERVICE_ON" = 0 ]; then
     exit 0
 fi
 step "4. 註冊 systemd 服務 $BOT_SERVICE（開機自動啟動、掛掉自動重啟）"
+if [ -n "$REMOTE_URL" ]; then
+    UNIT_DESC="Discord bot（接遠端 gateway）"
+    UNIT_AFTER="network-online.target"
+else
+    UNIT_DESC="Discord bot（接同一台的 vLLM）"
+    UNIT_AFTER="network-online.target ${SERVICE:-vllm}.service"
+fi
 sudo tee "$UNIT" >/dev/null <<EOF
 [Unit]
-Description=Discord bot（接同一台的 vLLM）
-After=network-online.target $SERVICE.service
+Description=$UNIT_DESC
+After=$UNIT_AFTER
 Wants=network-online.target
 
 [Service]

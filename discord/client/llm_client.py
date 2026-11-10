@@ -1,7 +1,8 @@
 """
 llm_client.py — 呼叫實驗室主機上的 vLLM（server/vllm 架設的那台，OpenAI 相容 API）。
 
-• 模型：自動使用 vLLM 目前載入的模型（/v1/models），主機用 vllmctl 換模型後 bot 不用改設定
+• 模型：預設自動使用服務目前載入的模型（/v1/models 第一個），主機換模型後 bot 不用改設定；
+        接多模型 gateway（例如 NCHC genai）時，可在 .env 用 LLM_MODEL 指定要用哪個
 • 金鑰：.env 的 LLM_API_KEY 留空時，自動讀主機的 ~/vllm-server/vllm.env 裡的 SERVE_API_KEY：
         Ubuntu 伺服器（例如 H200）直接讀檔；Windows 筆電從 WSL 讀。
         主機執行 vllmctl new-key 換金鑰後，遇到 401 會自動重讀一次
@@ -20,6 +21,10 @@ WSL_DISTRO = os.getenv("WSL_DISTRO", "Ubuntu").strip() or "Ubuntu"   # 只有 Wi
 VLLM_ENV   = os.path.expanduser(os.getenv("VLLM_ENV_FILE", "~/vllm-server/vllm.env"))   # 只有 Linux 用
 # 第一次載入模型、或多人同時使用時可能較慢，timeout 給寬一點
 TIMEOUT    = int(os.getenv("LLM_TIMEOUT", "600"))
+# 指定模型名稱；留空 = 自動用 /v1/models 的第一個（接多模型 gateway 時才需要填）
+MODEL      = os.getenv("LLM_MODEL", "").strip()
+# Discord !model 指令的 runtime 指定（記憶體；重啟後回到 LLM_MODEL/自動）
+_model_override: str = ""
 
 _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 _api_key = os.getenv("LLM_API_KEY", "").strip()
@@ -82,9 +87,19 @@ def list_models() -> list[dict]:
             for m in r.json().get("data", [])]
 
 
+def set_model(name: str) -> None:
+    """Discord !model 指令用：runtime 指定模型；傳空字串 = 取消指定，回到 LLM_MODEL/自動。"""
+    global _model_override, _model_cache
+    _model_override = name.strip()
+    _model_cache = None
+
+
 def current_model(refresh: bool = False) -> dict:
-    """目前 vLLM 載入的模型（快取 60 秒）。"""
+    """目前要用的模型（快取 60 秒）。優先序：!model 指定 > LLM_MODEL > /v1/models 第一個。"""
     global _model_cache
+    pinned = _model_override or MODEL
+    if pinned:
+        return {"id": pinned, "max_model_len": None}
     if not refresh and _model_cache and time.time() - _model_cache[0] < MODEL_CACHE_SEC:
         return _model_cache[1]
     models = list_models()
