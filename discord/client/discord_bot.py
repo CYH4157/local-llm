@@ -8,7 +8,8 @@ discord_bot.py — 把實驗室主機上的 vLLM（opencode 共用的那台）�
     !ppt <主題/需求>          產生 PowerPoint (.pptx)
     !word [計畫|報告] <需求>  產生 Word (.docx)；計畫=國科會計畫格式、報告=課堂報告
     !excel <需求>             產生 Excel (.xlsx)
-    !model                    顯示 vLLM 目前載入的模型（換模型請在主機用 vllmctl）
+    !models                   列出模型服務上可用的模型
+    !model [名稱|auto]        不加參數=顯示目前；加名稱=切換模型（本次執行有效）；auto=回預設
     !reset                    清空這個頻道的對話記憶
     !help                     顯示說明
 
@@ -227,7 +228,8 @@ HELP_TEXT = """**📖 使用說明**
 • `!word 報告 <主題>`：課堂報告 .docx
 • `!word <需求>`：一般文件 .docx
 • `!excel <需求>`：Excel 表格 .xlsx（可含公式）
-• `!model`：查看目前的模型（和 opencode 共用同一個）
+• `!models`：列出可用的模型
+• `!model <名稱>`：切換模型（本次執行有效）；`!model` 看目前、`!model auto` 回預設
 • `!reset`：清空這個頻道的記憶
 
 💡 產檔指令可以**附上 .txt/.md/.docx/.pdf** 或**回覆某則訊息**，當作參考資料。
@@ -244,22 +246,54 @@ client = discord.Client(intents=intents)
 async def on_ready():
     try:
         m = await run_blocking(llm_client.current_model)
-        info = f"模型={m['id']}（上下文 {m['max_model_len']}）"
+        ctx = f"，上下文 {m['max_model_len']}" if m.get("max_model_len") else ""
+        info = f"模型={m['id']}{ctx}"
     except Exception as e:  # noqa: BLE001
-        info = f"暫時連不上 vLLM：{e}"
+        info = f"暫時連不上模型服務：{e}"
     print(f"[已上線] {client.user}  {info}  API={llm_client.BASE_URL}")
 
 
-async def cmd_model(channel):
+async def cmd_models(channel):
+    """列出模型服務上可用的模型。"""
+    try:
+        models = await run_blocking(llm_client.list_models)
+    except Exception as e:  # noqa: BLE001
+        await channel.send(friendly_error(e))
+        return
+    if not models:
+        await channel.send("（模型服務沒有回傳任何模型）")
+        return
+    lines = []
+    for m in models:
+        ctx = f" — 上下文 {m['max_model_len']}" if m.get("max_model_len") else ""
+        lines.append(f"• `{m['id']}`{ctx}")
+    text = f"**可用模型**（共 {len(models)} 個）：\n" + "\n".join(lines) + "\n\n用 `!model <名稱>` 切換。"
+    for part in chunk_text(text):
+        await channel.send(part)
+
+
+async def cmd_model(channel, arg: str = ""):
+    """不加參數=顯示目前；加名稱=切換；auto/reset=取消指定回到 .env 預設。"""
+    arg = arg.strip()
+    if arg:
+        if arg.lower() in ("auto", "reset", "自動", "預設"):
+            llm_client.set_model("")
+            await channel.send("🔄 已取消指定，改回 .env 的 `LLM_MODEL`／自動選擇。用 `!model` 看目前。")
+        else:
+            llm_client.set_model(arg)
+            await channel.send(
+                f"✅ 已切換模型為 `{arg}`（本次執行有效，重啟後回到 .env 的 `LLM_MODEL`）。\n"
+                "若名稱打錯，下次回答會出現 404，用 `!models` 查正確名稱。")
+        return
     try:
         m = await run_blocking(llm_client.current_model, True)
     except Exception as e:  # noqa: BLE001
         await channel.send(friendly_error(e))
         return
+    ctx = f"（上下文 {m['max_model_len']} tokens）" if m.get("max_model_len") else ""
     await channel.send(
-        f"🤖 目前模型：`{m['id']}`（上下文 {m['max_model_len']} tokens）\n"
-        "和實驗室的 opencode 共用同一個 vLLM。要換模型請在主機用 `vllmctl`，"
-        "bot 會自動跟著換，不用改設定。")
+        f"🤖 目前模型：`{m['id']}`{ctx}\n"
+        "用 `!models` 列出可切換的模型、`!model <名稱>` 切換、`!model auto` 回預設。")
 
 
 async def cmd_generate(message: discord.Message, kind: str, arg: str):
@@ -364,8 +398,14 @@ async def on_message(message: discord.Message):
         histories.pop(message.channel.id, None)
         await message.channel.send("🧹 已清空這個頻道的對話記憶。")
         return
-    if cmd in ("!model", "!status"):
-        await cmd_model(message.channel)
+    if cmd == "!models":
+        await cmd_models(message.channel)
+        return
+    if cmd == "!status":
+        await cmd_model(message.channel, "")
+        return
+    if cmd == "!model":
+        await cmd_model(message.channel, arg)
         return
     if cmd in ("!ppt", "!word", "!excel"):
         await cmd_generate(message, cmd[1:], arg)
