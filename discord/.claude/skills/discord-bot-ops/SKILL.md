@@ -58,7 +58,7 @@ bash deploy.sh --uninstall             # 移除服務（.env 與 .venv 保留）
 
 - Discord 內:`!models` 列出可用模型、`!model <名稱>` 切換（本次執行有效,重啟回預設）、`!model auto` 取消指定、`!model` 看目前。
 - 永久改預設:改 `.env` 的 `LLM_MODEL`,再 `restart`。
-- 查 gateway 有哪些模型:`curl -s <LLM_BASE_URL>/models -H "Authorization: Bearer <KEY>" | python3 -m json.tool`。
+- 查 gateway 有哪些模型（一行一個、排序）:`curl -s <LLM_BASE_URL>/models -H "Authorization: Bearer <KEY>" | jq -r '.data[].id' | sort`（沒 `jq` 用 `... | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | sort`）。挑對話模型，避開 ASR/OCR/embedding/reranker/guardian/cosyvoice 等非聊天模型。
 
 ## 邀 bot 進新伺服器（例如 pikmin）
 
