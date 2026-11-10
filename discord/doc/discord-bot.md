@@ -37,7 +37,9 @@ Windows 筆電
 2. 左側 **Bot** → **Reset Token** 複製 token（token 等於 bot 本身，不要截圖或貼到任何地方）
 3. 同一頁把 **MESSAGE CONTENT INTENT** 打開（一定要開，不然 bot 收不到訊息）
 4. **OAuth2 → URL Generator**：Scopes 勾 `bot`；權限勾 `Send Messages`、`Read Message History`、`View Channels`、**`Attach Files`**（上傳產出的檔案需要）
-5. 用產生的網址把 bot 邀進伺服器
+5. **把 bot 加入伺服器**：複製最下面產生的網址 → 貼到瀏覽器打開 → 選要加入的伺服器（必須是**含你要用的頻道**那個）→ **Authorize**。授權後 bot 就會出現在該伺服器。
+
+> ⚠️ **bot 程式在跑 ≠ 已加入伺服器。** 一定要走這一步邀請，否則 bot 不會出現在任何地方。加入後，在 `ALLOWED_CHANNEL_ID` 設的頻道直接打字就會回，其他頻道要 `@bot` 或私訊；先打 `!help` 或 `!model` 測試。兩支不同的 bot（各自的 token）要各邀一次。
 
 > **token 是 Discord 的，不是 vLLM 的金鑰。** 兩把鑰匙不一樣，不要搞混：
 >
@@ -109,10 +111,26 @@ bash discord/client/deploy.sh \
 
 - `--remote <URL>`：OpenAI 相容服務的 base URL（結尾 `/v1`）。
 - `--api-key <KEY>`：該服務的金鑰。不想留在 shell 歷史紀錄就省略，裝完 `nano discord/client/.env` 填 `LLM_API_KEY`，再 `sudo systemctl restart discord-bot`。
-- `--model <名稱>`：gateway 掛多個模型時指定要用哪個（不指定＝清單第一個）。先查有哪些：`curl -s <URL>/models -H "Authorization: Bearer <KEY>" | python3 -m json.tool`。
+- `--model <名稱>`：gateway 掛多個模型時指定要用哪個（**強烈建議指定**；不指定＝清單第一個，可能抓到語音/OCR 等非聊天模型）。怎麼查見下方。
 - `--channel <頻道ID>`：只在這個頻道自動回一般聊天（見下方 `ALLOWED_CHANNEL_ID`）。
 
 systemd 服務與日常管理指令跟 2A 相同（`systemctl` / `journalctl`）。不加 `--remote` 就是本地 vLLM（預設）。
+
+#### 查 gateway 有哪些模型
+
+列出所有模型名稱（一行一個、排序）：
+
+```bash
+curl -s https://inner-medusa.genai.nchc.org.tw/v1/models -H "Authorization: Bearer <KEY>" | jq -r '.data[].id' | sort
+```
+
+沒有 `jq` 就用純內建工具（不需要 python）：
+
+```bash
+curl -s https://inner-medusa.genai.nchc.org.tw/v1/models -H "Authorization: Bearer <KEY>" | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | sort
+```
+
+清單會混很多**非聊天**模型，`--model` / `LLM_MODEL` 請挑**對話（chat / instruct）**的，避開：語音辨識（`Whisper-*`、`*-ASR-*`、`faster-whisper-*`）、語音合成（`cosyvoice`）、OCR（`*-ocr-*`）、向量/檢索（`bge-*`、`embedding*`、`*-reranker-*`、`jina-embeddings-*`）、內容審核（`*-safeguard-*`、`*-Guardian-*`）。NCHC 的繁中可用例：`Llama3-TAIDE-LX-70B-Chat`、`Gemma-3-TAIDE-12b-Chat`、`Llama-3.3-70B-Instruct`、`GLM-5.3`、`Kimi-K3-max`。
 
 ---
 
