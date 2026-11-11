@@ -28,6 +28,13 @@ def _expand(s: str) -> str:
     return s.replace("${BOT_DIR}", BOT_DIR.replace("\\", "/"))
 
 
+def _which(cmd: str) -> str | None:
+    """找指令；systemd 的 PATH 很短，額外找 ~/.local/bin（uv 預設裝這）與常見位置。"""
+    extra = [os.path.expanduser("~/.local/bin"), os.path.expanduser("~/.cargo/bin"), "/usr/local/bin"]
+    path = os.pathsep.join([os.environ.get("PATH", "")] + extra)
+    return shutil.which(cmd, path=path)
+
+
 def _safe_name(s: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "_", s)
 
@@ -94,7 +101,7 @@ class MCPManager:
         for name, cfg in conf.items():
             if not cfg.get("enabled", True):
                 continue
-            if not shutil.which(cfg.get("command", "")):
+            if not _which(cfg.get("command", "")):
                 self.skipped[name] = f"找不到指令 {cfg.get('command')}"
                 print(f"[MCP] 略過 {name}：{self.skipped[name]}")
                 continue
@@ -108,7 +115,7 @@ class MCPManager:
         cfg = srv.cfg
         env = {**os.environ, **{k: _expand(str(v)) for k, v in cfg.get("env", {}).items()}}
         params = StdioServerParameters(
-            command=shutil.which(cfg["command"]) or cfg["command"],
+            command=_which(cfg["command"]) or cfg["command"],
             args=[_expand(a) for a in cfg.get("args", [])],
             env=env,
         )

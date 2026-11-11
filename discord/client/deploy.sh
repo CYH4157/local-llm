@@ -131,7 +131,10 @@ if [ -n "$REMOTE_URL" ]; then
     grep -q '^HISTORY_MAX_CHARS=8000$' "$ENV_BOT" && set_bot_env HISTORY_MAX_CHARS 40000
     grep -q '^REF_MAX_CHARS=10000$' "$ENV_BOT" && set_bot_env REF_MAX_CHARS 40000
     ok "記憶：$(grep '^MAX_HISTORY=' "$ENV_BOT")、$(grep '^HISTORY_MAX_CHARS=' "$ENV_BOT")、$(grep '^REF_MAX_CHARS=' "$ENV_BOT")"
-    [ -n "$REMOTE_KEY" ] || warn "LLM_API_KEY 尚未設定：請編輯 .env 填入金鑰再 restart"
+    if [ -z "$REMOTE_KEY" ]; then
+        if grep -qE '^LLM_API_KEY=.+' "$ENV_BOT"; then ok "LLM_API_KEY：沿用 .env 裡原本的金鑰"
+        else warn "LLM_API_KEY 尚未設定：請編輯 .env 填入金鑰再 restart"; fi
+    fi
 else
     set_bot_env LLM_API_KEY ""
     ok "LLM_BASE_URL=$BASE_URL、LLM_API_KEY 留空（自動讀 ~/vllm-server/vllm.env，換金鑰也不用改）"
