@@ -22,6 +22,7 @@ discord_bot.py — 把實驗室主機上的 vLLM（opencode 共用的那台）�
 import asyncio
 import functools
 import io
+import json
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -229,6 +230,49 @@ def system_prompt() -> str:
               "並在回答附上資料來源網址；能直接回答的簡單問題就不要用工具。不要捏造工具沒查到的內容。"
               "用最少的工具呼叫拿到答案：資料夠了就回答，不要為了更精確反覆搜尋。回答要精簡。")
         s += skills.prompt_section()
+    s += memory_section()
+    return s
+
+
+# --- 長期記憶（memory MCP 的知識圖譜）自動帶入 system prompt -------------------
+MEMORY_FILE = os.getenv("MEMORY_FILE", os.path.join(BASE_DIR, "data", "memory.jsonl"))
+MEMORY_PROMPT_MAX_CHARS = int(os.getenv("MEMORY_PROMPT_MAX_CHARS", "3000"))
+
+
+def memory_section() -> str:
+    """把長期記憶整理成條列放進 system prompt，模型不用自己想起來去查。"""
+    lines = []
+    try:
+        with open(MEMORY_FILE, encoding="utf-8") as f:
+            for raw in f:
+                try:
+                    o = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if o.get("type") == "entity":
+                    obs = "；".join(o.get("observations") or [])
+                    lines.append(f"- {o.get('name', '')}（{o.get('entityType', '')}）：{obs}")
+                elif o.get("type") == "relation":
+                    lines.append(f"- {o.get('from', '')} —{o.get('relationType', '')}→ {o.get('to', '')}")
+    except OSError:
+        pass
+    has_tool = ENABLE_TOOLS and agent.tools_supported() and mcp.has("memory__create_entities")
+    if not lines and not has_tool:
+        return ""
+    s = "\n\n【長期記憶】以下是使用者先前要你記住的事，回答時一律遵守（使用者這次另外說明的除外）："
+    body, used, more = [], 0, 0
+    for ln in lines:
+        if used + len(ln) > MEMORY_PROMPT_MAX_CHARS:
+            more += 1
+            continue
+        body.append(ln)
+        used += len(ln)
+    s += ("\n" + "\n".join(body)) if body else "\n（目前沒有）"
+    if more:
+        s += f"\n（還有 {more} 筆沒列出，需要時用 memory 工具的 search_nodes 查）"
+    if has_tool:
+        s += ("\n使用者要你「記住」某件事時，用 memory 工具寫入（create_entities / add_observations），"
+              "要你忘記時刪除；不要記個人隱私或一次性的內容。")
     return s
 
 
@@ -621,7 +665,7 @@ async def cmd_slides(message: discord.Message, arg: str):
         await status.edit(content=f"🎨 做投影片中…（第 {steps[0]} 步）{label}"[:300])
 
     now = datetime.now(TW_TZ)
-    extra = f"\n\n現在時間：{now:%Y-%m-%d}（台灣時間）。" + skills.prompt_section()
+    extra = f"\n\n現在時間：{now:%Y-%m-%d}（台灣時間）。" + skills.prompt_section() + memory_section()
     msgs = slides_agent.build_messages(arg or "請根據參考資料製作", ref_text, extra)
     tools = {**BUILTIN_TOOLS, **skill_tools(proposals, message.author.display_name),
              **slides_agent.slide_tools(state)}
