@@ -39,6 +39,8 @@ import llm_client  # noqa: E402
 import mcp_client  # noqa: E402
 import office_gen  # noqa: E402
 import skills  # noqa: E402
+import slides_agent  # noqa: E402
+import slides_sandbox  # noqa: E402
 
 # --- 讀設定 -----------------------------------------------------------------
 TOKEN          = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
@@ -59,6 +61,8 @@ GOOGLE_CSE_ID  = os.getenv("GOOGLE_CSE_ID", "").strip()
 ENABLE_TOOLS   = os.getenv("ENABLE_TOOLS", "1").strip() not in ("0", "false", "False", "")
 # 用工具時的進度顯示：brief = 一則「查資料中…」訊息、答完自動刪掉；off = 不顯示
 TOOL_STATUS    = os.getenv("TOOL_STATUS", "brief").strip().lower()
+# !ppt：code = 模型寫 python-pptx 程式、在 LXD 沙盒執行並看預覽修正；json = 舊的固定版面
+PPT_MODE       = os.getenv("PPT_MODE", "code").strip().lower()
 TW_TZ          = timezone(timedelta(hours=8))
 
 
@@ -589,6 +593,61 @@ async def cmd_chat(message: discord.Message, content: str, do_web: bool):
         await post_proposal(channel, p)
 
 
+async def cmd_slides(message: discord.Message, arg: str):
+    """!ppt（code 模式）：模型查資料 → 寫 python-pptx 程式 → 沙盒執行 → 看預覽圖修正 → 上傳。"""
+    channel = message.channel
+    ref_text, notes = await gather_reference(message)
+    if not arg and not ref_text:
+        await channel.send("請告訴我需求，例如：`!ppt 生成式 AI 在教育的應用，給大學生聽，10 頁`")
+        return
+    why = await run_blocking(slides_sandbox.available)
+    if why:
+        await channel.send(f"（投影片沙盒無法使用：{why}；改用簡易模式）")
+        await cmd_generate(message, "ppt", arg)
+        return
+
+    status = await channel.send("🎨 開始做投影片（查資料 → 寫程式 → 看預覽修正），約需 3~10 分鐘…"
+                                + "".join(f"\n（{n}）" for n in notes))
+    state: dict = {}
+    proposals: list[dict] = []
+    steps = [0]
+
+    async def on_tool(name: str, brief: str):
+        steps[0] += 1
+        if name == "run_slides_code":
+            label = f"產生並檢查第 {state.get('runs', 0) + 1} 版投影片"
+        else:
+            label = name.split("__")[-1] + (f"：{brief}" if brief else "")
+        await status.edit(content=f"🎨 做投影片中…（第 {steps[0]} 步）{label}"[:300])
+
+    now = datetime.now(TW_TZ)
+    extra = f"\n\n現在時間：{now:%Y-%m-%d}（台灣時間）。" + skills.prompt_section()
+    msgs = slides_agent.build_messages(arg or "請根據參考資料製作", ref_text, extra)
+    tools = {**BUILTIN_TOOLS, **skill_tools(proposals, message.author.display_name),
+             **slides_agent.slide_tools(state)}
+    t0 = time.time()
+    try:
+        async with channel.typing():
+            answer = tw(await agent.run(msgs, mcp=mcp, builtins=tools, on_tool=on_tool,
+                                        max_rounds=slides_agent.SLIDE_TOOL_ROUNDS))
+    except Exception as e:  # noqa: BLE001
+        await status.edit(content=friendly_error(e))
+        return
+    if not state.get("pptx"):
+        await status.edit(content="⚠️ 沒有做出投影片。" + (f"\n{answer[:1500]}" if answer else ""))
+        return
+
+    await status.edit(content=f"✅ 投影片完成：{state.get('pages', '?')} 頁，改了 {state['runs']} 版，"
+                              f"{time.time() - t0:.0f} 秒")
+    files = [discord.File(state["pptx"], filename=os.path.basename(state["pptx"]))]
+    files += [discord.File(io.BytesIO(p), filename=f"preview-{i}.png")
+              for i, p in enumerate(state.get("previews", [])[:4], 1)]
+    await channel.send(content=(answer[:1700] + "\n\n⚠️ AI 草稿，內容、數據與來源請查證後再使用。"), files=files)
+    for p in proposals:
+        if message.guild is not None:
+            await post_proposal(channel, p)
+
+
 @client.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     """管理員在技能提案上按 ✅ / ❌。"""
@@ -683,6 +742,9 @@ async def on_message(message: discord.Message):
         return
     if cmd == "!model":
         await cmd_model(message.channel, arg)
+        return
+    if cmd == "!ppt" and PPT_MODE == "code" and ENABLE_TOOLS:
+        await cmd_slides(message, arg)
         return
     if cmd in ("!ppt", "!word", "!excel"):
         await cmd_generate(message, cmd[1:], arg)
