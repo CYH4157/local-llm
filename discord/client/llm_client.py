@@ -25,6 +25,9 @@ TIMEOUT    = int(os.getenv("LLM_TIMEOUT", "600"))
 MODEL      = os.getenv("LLM_MODEL", "").strip()
 # Discord !model 指令的 runtime 指定（記憶體；重啟後回到 LLM_MODEL/自動）
 _model_override: str = ""
+# 思考模式：auto = 本地 vLLM（127.0.0.1/localhost）關掉思考求快、遠端 gateway（如 NCHC Kimi）保留思考；
+#           off = 一律關掉；on = 一律不關（不送 enable_thinking 參數，交給模型預設）
+THINKING   = os.getenv("LLM_THINKING", "auto").strip().lower() or "auto"
 
 _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 _api_key = os.getenv("LLM_API_KEY", "").strip()
@@ -34,6 +37,19 @@ MODEL_CACHE_SEC = 60
 
 class AuthError(RuntimeError):
     pass
+
+
+class ToolsUnsupported(RuntimeError):
+    """模型服務不接受 tools 參數（gateway 沒開 tool calling）。"""
+
+
+def is_local() -> bool:
+    host = re.sub(r"^https?://", "", BASE_URL).split("/")[0].split(":")[0].lower()
+    return host in ("127.0.0.1", "localhost", "::1", "[::1]")
+
+
+def disable_thinking() -> bool:
+    return THINKING == "off" or (THINKING == "auto" and is_local())
 
 
 def read_key_from_host() -> str:
@@ -109,9 +125,11 @@ def current_model(refresh: bool = False) -> dict:
     return models[0]
 
 
-def chat(messages: list[dict], max_tokens: int | None = None,
-         temperature: float = 0.7, response_format: dict | None = None) -> str:
+def chat_message(messages: list[dict], max_tokens: int | None = None,
+                 temperature: float = 0.7, response_format: dict | None = None,
+                 tools: list[dict] | None = None) -> dict:
     """
+    回傳模型的完整 message（含 tool_calls / reasoning_content），給工具迴圈用。
     max_tokens=None → 不指定，vLLM 會用「上下文長度 − 輸入長度」當上限，
     不會因為 輸入 + max_tokens 超過 --max-model-len 而被拒絕。
     """
@@ -120,22 +138,37 @@ def chat(messages: list[dict], max_tokens: int | None = None,
             "model": current_model(refresh=attempt == 1)["id"],
             "messages": messages,
             "temperature": temperature,
-            # Qwen3 思考型模型關掉思考，日常任務快很多（其他模型會忽略此參數）
-            "chat_template_kwargs": {"enable_thinking": False},
         }
+        if disable_thinking():
+            # 本地 Qwen3 思考型模型關掉思考，日常任務快很多（其他模型會忽略此參數）
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         if max_tokens:
             payload["max_tokens"] = max_tokens
         if response_format:
             payload["response_format"] = response_format
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
         r = _request("POST", "/chat/completions", timeout=TIMEOUT, json=payload)
         # 404 = 主機剛換了模型、快取的名字已不存在 → 重抓一次模型名稱
         if r.status_code == 404 and attempt == 0:
             continue
         if r.status_code >= 400:
+            if tools and r.status_code in (400, 422) and "tool" in r.text.lower():
+                raise ToolsUnsupported(f"LLM API {r.status_code}: {r.text[:300]}")
             raise RuntimeError(f"LLM API {r.status_code}: {r.text[:300]}")
-        content = r.json()["choices"][0]["message"].get("content") or ""
-        return _THINK_RE.sub("", content).strip()
+        return r.json()["choices"][0]["message"]
     raise RuntimeError("找不到 vLLM 目前的模型")
+
+
+def clean(content: str | None) -> str:
+    return _THINK_RE.sub("", content or "").strip()
+
+
+def chat(messages: list[dict], max_tokens: int | None = None,
+         temperature: float = 0.7, response_format: dict | None = None) -> str:
+    msg = chat_message(messages, max_tokens, temperature, response_format)
+    return clean(msg.get("content"))
 
 
 def _extract_json(text: str):

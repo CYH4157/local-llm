@@ -3,8 +3,10 @@ discord_bot.py — 把實驗室主機上的 vLLM（opencode 共用的那台）�
 可以跑在 Windows 筆電（deploy.ps1，vLLM 在 WSL）或 Ubuntu 伺服器（deploy.sh，systemd 服務 discord-bot）。
 
 指令：
-    (直接聊天)                在允許的頻道發訊息、@提及 bot、或私訊 → 一般問答（離線）
-    !web <問題>               先上網搜尋再回答
+    (直接聊天)                在允許的頻道發訊息、@提及 bot、或私訊 → 問答；模型會自己決定要不要用工具
+                              （搜尋、讀網頁、維基、arXiv、計算、時間、長期記憶… 見 mcp_servers.json）
+    !web <問題>               強制先上網搜尋再回答
+    !tools                    列出目前可用的工具 / MCP server 狀態
     !ppt <主題/需求>          產生 PowerPoint (.pptx)
     !word [計畫|報告] <需求>  產生 Word (.docx)；計畫=國科會計畫格式、報告=課堂報告
     !excel <需求>             產生 Excel (.xlsx)
@@ -22,6 +24,7 @@ import functools
 import io
 import os
 import time
+from datetime import datetime, timedelta, timezone
 
 import discord
 import requests
@@ -31,7 +34,9 @@ from dotenv import load_dotenv
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
 
+import agent  # noqa: E402
 import llm_client  # noqa: E402
+import mcp_client  # noqa: E402
 import office_gen  # noqa: E402
 
 # --- 讀設定 -----------------------------------------------------------------
@@ -49,6 +54,9 @@ ALLOWED_CHANNEL_ID = int(_allowed) if _allowed.isdigit() else None
 SEARCH_ENGINE  = os.getenv("SEARCH_ENGINE", "google").strip().lower()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
 GOOGLE_CSE_ID  = os.getenv("GOOGLE_CSE_ID", "").strip()
+# 讓模型自己呼叫工具（內建 web_search + mcp_servers.json 的 MCP server）
+ENABLE_TOOLS   = os.getenv("ENABLE_TOOLS", "1").strip() not in ("0", "false", "False", "")
+TW_TZ          = timezone(timedelta(hours=8))
 
 
 if not TOKEN or TOKEN.startswith("貼上"):
@@ -140,6 +148,36 @@ def web_search(query: str, n: int = 5) -> str:
     return _ddg_search(query, n)
 
 
+# --- 工具（給模型呼叫）------------------------------------------------------
+BUILTIN_TOOLS: agent.Builtin = {
+    "web_search": (
+        {"type": "function", "function": {
+            "name": "web_search",
+            "description": "上網搜尋，回傳前幾筆結果的標題、摘要與網址。需要最新資訊、新聞、查證事實時使用；"
+                           "要看某個結果的全文，再用讀網頁的工具（fetch）。",
+            "parameters": {"type": "object", "properties": {
+                "query": {"type": "string", "description": "搜尋關鍵字"},
+                "n": {"type": "integer", "description": "要幾筆結果（1~10，預設 5）"},
+            }, "required": ["query"]},
+        }},
+        lambda query, n=5: web_search(query, max(1, min(int(n), 10))),
+    ),
+}
+
+mcp = mcp_client.MCPManager()
+_WEEK = "一二三四五六日"
+
+
+def system_prompt() -> str:
+    now = datetime.now(TW_TZ)
+    s = (f"{SYSTEM_PROMPT}\n\n現在時間：{now:%Y-%m-%d} 星期{_WEEK[now.weekday()]} {now:%H:%M}（台灣時間）。"
+         "你在 Discord 上回覆，可以用 Markdown，但不要用表格（Discord 不支援）。")
+    if ENABLE_TOOLS and agent.tools_supported():
+        s += ("\n你可以呼叫工具。遇到需要最新資訊、查證事實、使用者貼了網址、論文、精確計算時，先用工具再回答，"
+              "並在回答附上資料來源網址；能直接回答的簡單問題就不要用工具。不要捏造工具沒查到的內容。")
+    return s
+
+
 # --- 參考資料：附件 / 被回覆的訊息 -----------------------------------------
 TEXT_EXT = (".txt", ".md", ".csv")
 
@@ -207,6 +245,8 @@ async def run_blocking(func, *args, **kwargs):
 
 
 def friendly_error(e: Exception) -> str:
+    if isinstance(e, requests.exceptions.ConnectionError) and not llm_client.is_local():
+        return f"⚠️ 連不上模型服務（{llm_client.BASE_URL}），請稍後再試或請管理者檢查網路 / 金鑰。"
     if isinstance(e, requests.exceptions.ConnectionError):
         return ("⚠️ 連不上 vLLM。請管理者在主機執行 `vllmctl status` 檢查、`vllmctl start` 啟動"
                 "（Windows 筆電：雙擊 `server\\wsl2\\vllmctl.cmd`；Ubuntu 伺服器：`bash ~/local-llm/server/vllm/vllmctl.sh`）。")
@@ -221,8 +261,9 @@ def friendly_error(e: Exception) -> str:
 
 
 HELP_TEXT = """**📖 使用說明**
-• 直接聊天：@我、私訊，或在指定頻道發言
-• `!web <問題>`：上網搜尋後回答
+• 直接聊天：@我、私訊，或在指定頻道發言；我會視需要自己上網搜尋、讀網址、查維基 / arXiv、計算
+• `!web <問題>`：強制先上網搜尋再回答
+• `!tools`：看目前能用哪些工具
 • `!ppt <主題>`：產生簡報 .pptx（含講者備註）
 • `!word 計畫 <題目>`：國科會研究計畫草稿 .docx
 • `!word 報告 <主題>`：課堂報告 .docx
@@ -239,7 +280,20 @@ HELP_TEXT = """**📖 使用說明**
 # --- Discord 事件 -----------------------------------------------------------
 intents = discord.Intents.default()
 intents.message_content = True
-client = discord.Client(intents=intents)
+
+
+class Bot(discord.Client):
+    async def setup_hook(self):
+        # MCP server 在背景啟動，bot 不必等它們就緒就能上線
+        if ENABLE_TOOLS:
+            await mcp.start()
+
+    async def close(self):
+        await mcp.stop()
+        await super().close()
+
+
+client = Bot(intents=intents)
 
 
 @client.event
@@ -250,7 +304,22 @@ async def on_ready():
         info = f"模型={m['id']}{ctx}"
     except Exception as e:  # noqa: BLE001
         info = f"暫時連不上模型服務：{e}"
-    print(f"[已上線] {client.user}  {info}  API={llm_client.BASE_URL}")
+    think = "關" if llm_client.disable_thinking() else "開"
+    print(f"[已上線] {client.user}  {info}  API={llm_client.BASE_URL}  思考={think}  工具={'開' if ENABLE_TOOLS else '關'}")
+
+
+async def cmd_tools(channel):
+    if not ENABLE_TOOLS:
+        await channel.send("🔧 工具已關閉（.env 的 `ENABLE_TOOLS=0`）。")
+        return
+    if not agent.tools_supported():
+        await channel.send("⚠️ 目前的模型服務不支援工具呼叫（tools 參數被拒絕），只能一般聊天。")
+        return
+    lines = ["**🔧 可用工具**", "✅ `web_search`：內建網路搜尋"] + mcp.status_lines()
+    n = len(BUILTIN_TOOLS) + len(mcp.openai_tools())
+    text = "\n".join(lines) + f"\n\n共 {n} 個工具，模型會自己決定要不要用。設定檔：`mcp_servers.json`"
+    for part in chunk_text(text):
+        await channel.send(part)
 
 
 async def cmd_models(channel):
@@ -359,9 +428,22 @@ async def cmd_chat(message: discord.Message, content: str, do_web: bool):
                     f"參考以下網路搜尋結果回答問題，並在句末標註引用編號 [n]：\n\n"
                     f"{results}\n\n問題：{content}"
                 )
-            msgs = [{"role": "system", "content": SYSTEM_PROMPT}] + _trim(
+            msgs = [{"role": "system", "content": system_prompt()}] + _trim(
                 hist + [{"role": "user", "content": user_content}])
-            answer = tw(await run_blocking(llm_client.chat, msgs))
+
+            used: list[str] = []
+            status: list[discord.Message] = []
+
+            async def on_tool(name: str, brief: str):
+                used.append(f"`{name}`" + (f" {brief}" if brief else ""))
+                text = "🔧 " + "\n🔧 ".join(used[-8:])
+                if status:
+                    await status[0].edit(content=text)
+                else:
+                    status.append(await channel.send(text))
+
+            answer = tw(await agent.run(msgs, mcp=mcp, builtins=BUILTIN_TOOLS,
+                                        on_tool=on_tool, use_tools=ENABLE_TOOLS))
         except Exception as e:  # noqa: BLE001
             await channel.send(friendly_error(e))
             return
@@ -400,6 +482,9 @@ async def on_message(message: discord.Message):
         return
     if cmd == "!models":
         await cmd_models(message.channel)
+        return
+    if cmd == "!tools":
+        await cmd_tools(message.channel)
         return
     if cmd == "!status":
         await cmd_model(message.channel, "")

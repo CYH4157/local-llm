@@ -138,8 +138,9 @@ curl -s https://inner-medusa.genai.nchc.org.tw/v1/models -H "Authorization: Bear
 
 | 指令 | 說明 |
 |------|------|
-| @提及 / 私訊 / 直接發言 | 一般聊天（離線） |
-| `!web <問題>` | 上網搜尋後回答 |
+| @提及 / 私訊 / 直接發言 | 聊天；模型會自己決定要不要用工具（見下方「工具」） |
+| `!web <問題>` | 強制先上網搜尋再回答 |
+| `!tools` | 列出目前可用的工具與 MCP server 狀態 |
 | `!ppt <主題>` | 產生簡報 .pptx（16:9，含講者備註） |
 | `!word 計畫 <題目>` | 國科會專題研究計畫草稿（背景、文獻、方法、甘特圖…） |
 | `!word 報告 <主題>` | 課堂報告 .docx |
@@ -156,6 +157,28 @@ curl -s https://inner-medusa.genai.nchc.org.tw/v1/models -H "Authorization: Bear
 **範本**：把實驗室的 `ppt_template.pptx`、`word_template.docx` 放進 [discord/client/templates/](../client/templates/README.md) 就會自動套用。
 
 > 本地小模型產出的是**草稿**。參考文獻一律標為「[待補]」，模型被要求不可捏造文獻；數據和論述都請人工查證。
+
+### 工具（function calling + MCP）
+
+一般聊天時，bot 會把工具清單一起送給模型（OpenAI `tools` 參數），模型想用工具時 bot 執行後把結果餵回去，最多 `MAX_TOOL_ROUNDS` 輪。用到的工具會在 Discord 顯示 🔧。
+模型服務不接受 `tools` 參數時，bot 會自動退回一般聊天。
+
+| 工具 | 來源 | 用途 | 需要 |
+|------|------|------|------|
+| `web_search` | 內建 | 網路搜尋（Google CSE，沒金鑰用 DuckDuckGo） | — |
+| `fetch` | `uvx mcp-server-fetch` | 讀網頁全文 | uv |
+| `time` | `uvx mcp-server-time` | 現在時間、時區換算 | uv |
+| `calculator` | `uvx mcp-server-calculator` | 精確計算 | uv |
+| `wikipedia` | `uvx wikipedia-mcp` | 維基百科搜尋 / 摘要 | uv |
+| `arxiv` | `uvx arxiv-mcp-server` | 搜尋 / 讀 arXiv 論文（存在 `data/arxiv/`） | uv |
+| `memory` | `npx @modelcontextprotocol/server-memory` | 長期記憶（存在 `data/memory.jsonl`，**所有頻道與伺服器共用**） | Node.js 18+ |
+| `context7` | `npx @upstash/context7-mcp` | 程式套件最新文件（免金鑰、有流量限制） | Node.js 18+ |
+| `sequential-thinking` | `npx @modelcontextprotocol/server-sequential-thinking` | 逐步思考；預設關（Kimi 本身會思考） | Node.js 18+ |
+
+- 全部免費、免金鑰。開關與參數在 [`mcp_servers.json`](../client/mcp_servers.json)，改完重啟 bot；找不到指令（例如沒裝 Node.js）的會自動略過。
+- 第一次啟動時 uvx / npx 要下載套件，工具會在 bot 上線後 1~3 分鐘內陸續就緒（`!tools` 看狀態）。
+- 安全：工具參數裡指向內網 / 本機的網址會被擋掉（`BLOCK_PRIVATE_URLS=1`），避免有人叫 bot 讀 vLLM 或實驗室內部服務。注意這只檢查參數裡的網址，擋不住外部網站轉址到內網。
+- 不開 Discord 也能測：`.venv/bin/python selftest.py`（測 MCP）、`.venv/bin/python selftest.py --llm`（再用 `.env` 的模型實測工具呼叫）。
 
 ---
 
@@ -177,7 +200,11 @@ bot 會自動讀主機的金鑰（Ubuntu 直接讀 `~/vllm-server/vllm.env`、Wi
 | `LLM_API_KEY` | 留空 = 自動讀主機的 vllm.env（建議，本地 vLLM）；**接遠端 gateway 時要填**該服務金鑰 |
 | `LLM_MODEL` | 指定模型名稱；留空＝自動用 `/v1/models` 第一個（本地 vLLM 建議留空）；多模型 gateway 填要用的那個 |
 | `SYSTEM_PROMPT` | bot 個性 |
-| `MAX_HISTORY` / `HISTORY_MAX_CHARS` | 對話記憶則數和總字數上限 |
+| `MAX_HISTORY` / `HISTORY_MAX_CHARS` | 對話記憶則數和總字數上限（`deploy.sh --remote` 會從 10 / 8000 放大成 30 / 40000） |
+| `LLM_THINKING` | `auto`（預設）＝本地 vLLM 關思考求快、遠端 gateway 保留思考；`off` / `on` 強制 |
+| `ENABLE_TOOLS` | 1＝模型可呼叫工具（預設）；0＝只聊天 |
+| `MAX_TOOL_ROUNDS` / `TOOL_RESULT_MAX_CHARS` | 每次回答最多幾輪工具、每個工具結果最多幾字 |
+| `BLOCK_PRIVATE_URLS` | 擋掉工具存取內網 / 本機網址（預設 1） |
 | `REF_MAX_CHARS` | 附件參考資料字數上限 |
 | `TO_TRADITIONAL` | 自動簡轉繁（1/0） |
 | `DOC_FONT_EA` / `DOC_FONT_LATIN` / `PPT_FONT` | 文件字型 |
@@ -195,13 +222,19 @@ bot 會自動讀主機的金鑰（Ubuntu 直接讀 `~/vllm-server/vllm.env`、Wi
 | 每則訊息被回兩次 | 兩台主機用了同一個 token：各建一個 Application，或停掉其中一台 |
 | 顯示「API 金鑰錯誤」 | `.env` 的 `LLM_API_KEY` 清空，重啟 bot |
 | 顯示「內容太長」 | `!reset` 清記憶，或縮短附件；常發生就調小 `REF_MAX_CHARS` |
-| 回應很慢 | 同學正在大量使用 opencode（共用同一張顯卡），稍等即可 |
+| 回應很慢 | 同學正在大量使用 opencode（共用同一張顯卡），稍等即可；遠端 Kimi 開著思考 + 呼叫工具本來就要幾十秒 |
+| `!tools` 顯示某個 server ❌ / ⏭️ | ⏭️ 找不到指令：裝 uv 或 Node.js 18+；❌ 看 `journalctl -u discord-bot -n 200` 裡 `[MCP]` 開頭 的錯誤 |
+| `!tools` 說模型不支援工具 | gateway 沒開 tool calling；自架 vLLM 要加 `--enable-auto-tool-choice --tool-call-parser <對應模型>` |
 
 ## 檔案清單（都在 `discord/client/`）
 | 檔案 | 用途 |
 |------|------|
 | `discord_bot.py` | Discord bot 本體（指令處理） |
 | `llm_client.py` | 呼叫 vLLM、自動讀金鑰與模型、JSON 結構化輸出 |
+| `agent.py` | 工具呼叫迴圈（模型 ↔ 工具） |
+| `mcp_client.py` / `mcp_servers.json` | 連 MCP server、工具清單與設定 |
+| `selftest.py` | 不開 Discord 測工具與模型 |
+| `data/` | MCP 資料：長期記憶、arXiv 論文（不進 git） |
 | `office_gen.py` | JSON schema、提示詞、pptx/docx/xlsx 排版 |
 | `deploy.ps1` | Windows 筆電一鍵部署 |
 | `deploy.sh` | Ubuntu 伺服器一鍵部署（含 systemd 服務 `discord-bot`） |

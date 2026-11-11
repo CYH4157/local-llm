@@ -126,6 +126,11 @@ if [ -n "$REMOTE_URL" ]; then
     [ -z "$REMOTE_KEY" ] || set_bot_env LLM_API_KEY "$REMOTE_KEY"
     set_bot_env LLM_MODEL "$REMOTE_MODEL"
     ok "遠端模式：LLM_BASE_URL=$BASE_URL、LLM_MODEL=${REMOTE_MODEL:-（自動選第一個）}"
+    # 遠端大模型上下文夠大：記憶與參考資料還是本地 vLLM 的預設小值時，放大
+    grep -q '^MAX_HISTORY=10$' "$ENV_BOT" && set_bot_env MAX_HISTORY 30
+    grep -q '^HISTORY_MAX_CHARS=8000$' "$ENV_BOT" && set_bot_env HISTORY_MAX_CHARS 40000
+    grep -q '^REF_MAX_CHARS=10000$' "$ENV_BOT" && set_bot_env REF_MAX_CHARS 40000
+    ok "記憶：$(grep '^MAX_HISTORY=' "$ENV_BOT")、$(grep '^HISTORY_MAX_CHARS=' "$ENV_BOT")、$(grep '^REF_MAX_CHARS=' "$ENV_BOT")"
     [ -n "$REMOTE_KEY" ] || warn "LLM_API_KEY 尚未設定：請編輯 .env 填入金鑰再 restart"
 else
     set_bot_env LLM_API_KEY ""
@@ -133,6 +138,17 @@ else
 fi
 [ -z "$TOKEN" ] || set_bot_env DISCORD_BOT_TOKEN "$TOKEN"
 [ -z "$CHANNEL_ID" ] || { set_bot_env ALLOWED_CHANNEL_ID "$CHANNEL_ID"; ok "ALLOWED_CHANNEL_ID=$CHANNEL_ID（只在這個頻道自動回，其他頻道要 @bot/私訊）"; }
+# MCP 工具：uvx 類（fetch/time/calculator/wikipedia/arxiv）跟著 uv 已經有了；npx 類（memory/context7）要 Node.js 18+
+if command -v npx >/dev/null 2>&1; then
+    ok "MCP：找到 npx（$(node --version 2>/dev/null)），memory / context7 工具可用"
+else
+    warn "MCP：沒有 Node.js（npx），memory / context7 會略過；要用請先裝 Node.js 18+（例：https://github.com/nodesource/distributions）"
+fi
+# systemd 的 PATH 很短，要把 uvx（~/.local/bin）與 npx 的位置放進去
+SVC_PATH="$HOME/.local/bin"
+NPX_DIR="$(dirname "$(command -v npx 2>/dev/null || echo /usr/bin/npx)")"
+case ":$SVC_PATH:" in *":$NPX_DIR:"*) ;; *) SVC_PATH="$SVC_PATH:$NPX_DIR" ;; esac
+SVC_PATH="$SVC_PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 HAS_TOKEN=1
 grep -qE '^DISCORD_BOT_TOKEN=.{20,}$' "$ENV_BOT" && ! grep -q '^DISCORD_BOT_TOKEN=貼上' "$ENV_BOT" || HAS_TOKEN=0
 
@@ -159,6 +175,7 @@ Wants=network-online.target
 User=$USER
 WorkingDirectory=$HERE
 Environment=PYTHONUNBUFFERED=1
+Environment=PATH=$SVC_PATH
 ExecStart=$HERE/.venv/bin/python $HERE/discord_bot.py
 Restart=always
 RestartSec=10
