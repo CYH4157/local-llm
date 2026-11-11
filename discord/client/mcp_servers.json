@@ -20,10 +20,10 @@
       "enabled": true
     },
     "wikipedia": {
-      "_用途": "查維基百科條目、摘要",
+      "_用途": "查維基百科條目、摘要；預設關：在 NCHC 主機上搜尋常查無結果，且同一批工具會註冊兩份（約 30 個），模型改用 web_search + fetch 讀維基頁面即可",
       "command": "uvx",
       "args": ["wikipedia-mcp"],
-      "enabled": true
+      "enabled": false
     },
     "arxiv": {
       "_用途": "搜尋 / 下載 / 閱讀 arXiv 論文",

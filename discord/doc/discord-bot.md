@@ -169,7 +169,7 @@ curl -s https://inner-medusa.genai.nchc.org.tw/v1/models -H "Authorization: Bear
 | `fetch` | `uvx mcp-server-fetch` | 讀網頁全文 | uv |
 | `time` | `uvx mcp-server-time` | 現在時間、時區換算 | uv |
 | `calculator` | `uvx mcp-server-calculator` | 精確計算 | uv |
-| `wikipedia` | `uvx wikipedia-mcp` | 維基百科搜尋 / 摘要 | uv |
+| `wikipedia` | `uvx wikipedia-mcp` | 維基百科搜尋 / 摘要；預設關（主機上常查無結果、工具重複註冊 ~30 個；fetch 就能讀維基） | uv |
 | `arxiv` | `uvx arxiv-mcp-server` | 搜尋 / 讀 arXiv 論文（存在 `data/arxiv/`） | uv |
 | `memory` | `npx @modelcontextprotocol/server-memory` | 長期記憶（存在 `data/memory.jsonl`，**所有頻道與伺服器共用**） | Node.js 18+ |
 | `context7` | `npx @upstash/context7-mcp` | 程式套件最新文件（免金鑰、有流量限制） | Node.js 18+ |
