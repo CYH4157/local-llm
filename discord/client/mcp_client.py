@@ -114,8 +114,13 @@ class MCPManager:
         from mcp.client.stdio import stdio_client
         cfg = srv.cfg
         env = {**os.environ, **{k: _expand(str(v)) for k, v in cfg.get("env", {}).items()}}
+        command = _which(cfg["command"]) or cfg["command"]
+        # npx 用 #!/usr/bin/env node 啟動：指令所在目錄（例如 ~/.local/bin）要在子行程的 PATH 裡
+        cmd_dir = os.path.dirname(command)
+        if cmd_dir and cmd_dir not in env.get("PATH", "").split(os.pathsep):
+            env["PATH"] = cmd_dir + os.pathsep + env.get("PATH", "")
         params = StdioServerParameters(
-            command=_which(cfg["command"]) or cfg["command"],
+            command=command,
             args=[_expand(a) for a in cfg.get("args", [])],
             env=env,
         )
