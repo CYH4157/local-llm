@@ -11,15 +11,21 @@ import slides_sandbox
 PPT_FONT = os.getenv("PPT_FONT", "微軟正黑體")
 MAX_SLIDE_RUNS = int(os.getenv("MAX_SLIDE_RUNS", "5"))      # 最多執行幾版程式
 SLIDE_TOOL_ROUNDS = int(os.getenv("SLIDE_TOOL_ROUNDS", "18"))  # 含查資料的總工具輪數
+RESEARCH_LIMIT = int(os.getenv("SLIDE_RESEARCH_LIMIT", "8"))   # 查資料最多幾次工具呼叫
+DEADLINE_MIN = float(os.getenv("SLIDE_DEADLINE_MIN", "15"))    # 整體時間上限（分鐘），到了就用最後一版收尾
+CODE_TOOLS = frozenset({"run_slides_code", "edit_slides_code", "read_skill", "propose_skill"})
 
 SYSTEM = f"""你是專業的簡報設計師兼 Python 工程師，要用 python-pptx 寫程式做出一份**好看、專業、內容正確**的投影片。
 
 ## 流程
 1. 規劃：確認主題、受眾、頁數（沒指定就 8~12 頁），每頁只講一個重點，安排故事線（封面 → 大綱/問題 → 內容 → 結論 → 參考資料）。
-2. 查資料：需要事實、數據、最新資訊時先用 web_search / fetch / arxiv 等工具查證；有相關技能先 read_skill。不要捏造數據或文獻。
-3. 寫程式：寫一支完整的 Python 程式，呼叫 run_slides_code 執行。
+2. 查資料：需要事實、數據、最新資訊時用 web_search / fetch / arxiv 等工具查證；有相關技能先 read_skill。
+   **查資料最多 {RESEARCH_LIMIT} 次**，同一次回應可以平行發出多個查詢；夠用就停，不要追求完美。不要捏造數據或文獻。
+3. 寫程式：寫一支完整的 Python 程式，呼叫 run_slides_code 執行（第一版才需要給完整程式）。
 4. 檢查：工具會回傳錯誤訊息，或每頁的預覽圖。逐頁仔細檢查：文字超出框或被切掉、元素重疊、字太小或太擠、
-   對比不足看不清、大片空白、對齊不一致、中文出現方框。有任何問題就修改程式再執行，直到沒有問題（最多 {MAX_SLIDE_RUNS} 版）。
+   對比不足看不清、大片空白、對齊不一致、中文出現方框。
+   有問題時**用 edit_slides_code 只改需要改的部分**（一次可以送多處修改），不要重寫整支程式；
+   最多 {MAX_SLIDE_RUNS} 版，整體時間約 {DEADLINE_MIN:.0f} 分鐘，小瑕疵不影響閱讀就可以收尾。
 5. 完成後用 2~4 句話說明這份投影片的結構與重點（不要貼程式碼）。
 
 ## 程式規則
@@ -52,16 +58,44 @@ def slide_tools(state: dict) -> dict:
         if state["runs"] >= MAX_SLIDE_RUNS:
             return f"已執行 {MAX_SLIDE_RUNS} 版，不能再執行了。請直接用最後一版收尾並說明。"
         state["runs"] += 1
+        state["code"] = code
         res = slides_sandbox.run_deck(code)
         text = f"[第 {state['runs']} 版] " + res["message"]
         if not res["ok"]:
-            return text + "\n請修正程式後再執行。"
+            return text + "\n請用 edit_slides_code 修正錯誤的地方後再執行。"
         state["pptx"], state["previews"], state["pages"] = res["pptx"], res["previews"], res["pages"]
         text += ("\n預覽圖附在下一則訊息（每張最多 6 頁，左上角標頁碼）。逐頁檢查版面問題；"
-                 "有問題就改程式重跑，沒問題就結束並說明。")
+                 "有問題就用 edit_slides_code 局部修改，沒問題就結束並說明。")
         return {"text": text, "images": [slides_sandbox.to_data_url(p) for p in res["previews"]]}
 
-    return {"run_slides_code": ({"type": "function", "function": {
+    def edit_slides_code(edits: list):
+        code = state.get("code")
+        if not code:
+            return "還沒有程式可以修改，請先用 run_slides_code 給完整程式。"
+        if not isinstance(edits, list) or not edits:
+            return "edits 必須是至少一筆 {old, new} 的清單"
+        for i, e in enumerate(edits, 1):
+            old, new = (e or {}).get("old", ""), (e or {}).get("new", "")
+            n = code.count(old) if old else 0
+            if n != 1:
+                return (f"第 {i} 筆修改失敗：old 在程式中出現 {n} 次（必須剛好 1 次）。"
+                        "請多帶幾行前後文讓它唯一，所有修改都沒有套用。")
+            code = code.replace(old, new)
+        return run_slides_code(code)
+
+    return {"edit_slides_code": ({"type": "function", "function": {
+        "name": "edit_slides_code",
+        "description": "修改上一版投影片程式後重新執行（用字串取代，每筆 old 必須在程式中剛好出現一次），"
+                       "回傳錯誤或新的預覽圖。修正版面時優先用這個，比重寫整支程式快很多。",
+        "parameters": {"type": "object", "properties": {
+            "edits": {"type": "array", "description": "依序套用的修改",
+                      "items": {"type": "object", "properties": {
+                          "old": {"type": "string", "description": "要被取代的原始程式片段（含足夠前後文）"},
+                          "new": {"type": "string", "description": "取代後的程式片段"},
+                      }, "required": ["old", "new"]}},
+        }, "required": ["edits"]},
+    }}, edit_slides_code),
+        "run_slides_code": ({"type": "function", "function": {
         "name": "run_slides_code",
         "description": "在沙盒執行一支完整的 python-pptx 程式（必須存出 output.pptx），回傳錯誤訊息或每頁的預覽圖。"
                        f"每次都要給完整程式（不是片段）。最多執行 {MAX_SLIDE_RUNS} 次。",

@@ -143,7 +143,7 @@ curl -s https://inner-medusa.genai.nchc.org.tw/v1/models -H "Authorization: Bear
 | `!tools` | 列出目前可用的工具與 MCP server 狀態 |
 | `!skills` / `!skill <名稱>` | 列出技能 / 看某個技能內容 |
 | `!skill del <名稱>` | 刪除技能（限管理員） |
-| `!ppt <主題>` | 產生簡報 .pptx（16:9，含講者備註） |
+| `!ppt <主題>` | 查資料 → 模型寫程式設計 → 看預覽修正 → 產生 .pptx（見下方「投影片」） |
 | `!word 計畫 <題目>` | 國科會專題研究計畫草稿（背景、文獻、方法、甘特圖…） |
 | `!word 報告 <主題>` | 課堂報告 .docx |
 | `!word <需求>` | 一般文件 .docx |
@@ -181,6 +181,27 @@ curl -s https://inner-medusa.genai.nchc.org.tw/v1/models -H "Authorization: Bear
 - 全部免費、免金鑰。開關與參數在 [`mcp_servers.json`](../client/mcp_servers.json)，改完重啟 bot；找不到指令（例如沒裝 Node.js）的會自動略過。
 - 第一次啟動時 uvx / npx 要下載套件，工具會在 bot 上線後 1~3 分鐘內陸續就緒（`!tools` 看狀態）。
 - 安全：工具參數裡指向內網 / 本機的網址會被擋掉（`BLOCK_PRIVATE_URLS=1`），避免有人叫 bot 讀 vLLM 或實驗室內部服務。注意這只檢查參數裡的網址，擋不住外部網站轉址到內網。
+### 投影片（`!ppt`，Claude Code 式）
+
+`PPT_MODE=code`（預設）時，`!ppt` 不再套固定模板，而是讓模型像工程師一樣做簡報：
+
+1. 規劃頁數與故事線，需要時用 web_search / fetch / arxiv / 技能查資料。
+2. 自己寫一支完整的 python-pptx 程式，呼叫 `run_slides_code`。
+3. 程式在 **LXD 沙盒容器 `pptx-sandbox`** 執行：非特權容器、普通使用者 `runner`、**沒有網路**、限制 4 CPU / 4 GB / 1024 行程、每版 120 秒。
+4. 容器裡的 LibreOffice 把投影片轉成 PNG，拼成預覽圖給模型看（Kimi-K3 看得懂圖）；模型發現文字超框、重疊、太擠就改程式重跑，最多 5 版。
+5. 完成後把 `.pptx` 和預覽圖傳到 Discord。
+
+**建立沙盒**（只要一次，不需要 sudo，但使用者要在 `lxd` 群組）：
+
+```bash
+bash ~/local-llm/discord/client/sandbox/setup-sandbox.sh
+```
+
+會初始化 LXD（建立 `lxdbr0` 橋接網路）、建容器、裝 LibreOffice + Noto 中文字型 + python-pptx/matplotlib，然後**切斷容器網路**並存快照 `clean`。沙盒被弄亂時 `setup-sandbox.sh --reset` 還原。
+「微軟正黑體」「標楷體」等 Windows 字型在預覽時會對應到 Noto，使用者在 PowerPoint 打開時則用真正的字型。
+沙盒不存在或 `ENABLE_TOOLS=0` 時，`!ppt` 自動退回舊的固定版面（`PPT_MODE=json` 可強制）。
+限制：沙盒沒網路，所以投影片裡沒有網路圖片（可以用形狀、圖表、matplotlib 圖）。
+
 ### 技能庫（越用越會）
 
 模型本身不會學習，但 bot 會把「好用的做法」存成技能，之後每次回答都把技能清單放進 system prompt，相關時模型會讀出來照做。
@@ -249,6 +270,8 @@ bot 會自動讀主機的金鑰（Ubuntu 直接讀 `~/vllm-server/vllm.env`、Wi
 | `mcp_client.py` / `mcp_servers.json` | 連 MCP server、工具清單與設定 |
 | `selftest.py` | 不開 Discord 測工具與模型 |
 | `skills.py` | 技能庫（存取 `data/skills/`、提案驗證） |
+| `slides_agent.py` / `slides_sandbox.py` | `!ppt` code 模式：提示詞、`run_slides_code` 工具、LXD 沙盒執行與預覽 |
+| `sandbox/setup-sandbox.sh` | 建立 / 更新 / 還原投影片沙盒容器 |
 | `data/` | 技能、長期記憶、arXiv 論文（不進 git） |
 | `office_gen.py` | JSON schema、提示詞、pptx/docx/xlsx 排版 |
 | `deploy.ps1` | Windows 筆電一鍵部署 |

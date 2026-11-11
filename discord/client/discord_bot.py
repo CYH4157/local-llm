@@ -380,7 +380,7 @@ HELP_TEXT = """**📖 使用說明**
 • `!web <問題>`：強制先上網搜尋再回答
 • `!tools`：看目前能用哪些工具
 • `!skills`：看我學會的技能；`!skill <名稱>` 看內容（教我做法時說「記成技能」，管理員按 ✅ 才生效）
-• `!ppt <主題>`：產生簡報 .pptx（含講者備註）
+• `!ppt <主題>`：查資料、設計並自我檢查後產生簡報 .pptx（含講者備註，約 3~10 分鐘）
 • `!word 計畫 <題目>`：國科會研究計畫草稿 .docx
 • `!word 報告 <主題>`：課堂報告 .docx
 • `!word <需求>`：一般文件 .docx
@@ -614,7 +614,7 @@ async def cmd_slides(message: discord.Message, arg: str):
 
     async def on_tool(name: str, brief: str):
         steps[0] += 1
-        if name == "run_slides_code":
+        if name in ("run_slides_code", "edit_slides_code"):
             label = f"產生並檢查第 {state.get('runs', 0) + 1} 版投影片"
         else:
             label = name.split("__")[-1] + (f"：{brief}" if brief else "")
@@ -629,7 +629,10 @@ async def cmd_slides(message: discord.Message, arg: str):
     try:
         async with channel.typing():
             answer = tw(await agent.run(msgs, mcp=mcp, builtins=tools, on_tool=on_tool,
-                                        max_rounds=slides_agent.SLIDE_TOOL_ROUNDS))
+                                        max_rounds=slides_agent.SLIDE_TOOL_ROUNDS,
+                                        deadline=t0 + slides_agent.DEADLINE_MIN * 60,
+                                        call_limit=slides_agent.RESEARCH_LIMIT,
+                                        limit_exempt=slides_agent.CODE_TOOLS))
     except Exception as e:  # noqa: BLE001
         await status.edit(content=friendly_error(e))
         return

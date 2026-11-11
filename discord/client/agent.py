@@ -34,12 +34,18 @@ def _short(args: dict) -> str:
 
 async def run(messages: list[dict], mcp=None, builtins: Builtin | None = None,
               on_tool: Callable[[str, str], Awaitable[None]] | None = None,
-              use_tools: bool = True, max_rounds: int | None = None) -> str:
+              use_tools: bool = True, max_rounds: int | None = None,
+              deadline: float | None = None, call_limit: int | None = None,
+              limit_exempt: frozenset = frozenset()) -> str:
     """
     跑完整個工具迴圈，回傳最終答案文字。on_tool(工具名, 參數摘要) 給 Discord 顯示進度。
     內建工具可以回傳 str，或 {"text": str, "images": [data URL...]}：圖片會在工具結果後
     以一則 user 訊息附給模型看（tool 訊息只能放文字）。
+    deadline：time.time() 的截止時間，過了就不再給工具，逼模型收尾。
+    call_limit：limit_exempt 以外的工具（例如查資料）最多呼叫幾次，超過回傳「請開始做正事」。
     """
+    import time
+    calls_used = 0
     global _tools_supported
     builtins = builtins or {}
     msgs = list(messages)
@@ -56,7 +62,11 @@ async def run(messages: list[dict], mcp=None, builtins: Builtin | None = None,
 
     for round_ in range(limit + 1):
         # 最後一輪不給工具，逼模型用手上的資料作答
-        tools = tool_specs() if round_ < limit else []
+        late = deadline is not None and time.time() > deadline
+        tools = tool_specs() if round_ < limit and not late else []
+        if late and round_ < limit:
+            msgs.append({"role": "user", "content": "時間到了，不能再使用工具。請根據目前的結果直接收尾回答。"})
+            limit = round_   # 只再問一次
         try:
             msg = await asyncio.to_thread(llm_client.chat_message, msgs, tools=tools or None)
         except llm_client.ToolsUnsupported as e:
@@ -90,7 +100,12 @@ async def run(messages: list[dict], mcp=None, builtins: Builtin | None = None,
                         await on_tool(name, _short(args))
                     except Exception:  # noqa: BLE001  顯示進度失敗不影響回答
                         pass
-                result = await _exec(name, args, mcp, builtins)
+                if call_limit is not None and name not in limit_exempt:
+                    calls_used += 1
+                if call_limit is not None and name not in limit_exempt and calls_used > call_limit:
+                    result = f"查資料的次數已用完（{call_limit} 次）。資料已足夠，請立刻用手上的資料進行下一步。"
+                else:
+                    result = await _exec(name, args, mcp, builtins)
                 if isinstance(result, dict):
                     images += result.get("images") or []
                     result = str(result.get("text", ""))
