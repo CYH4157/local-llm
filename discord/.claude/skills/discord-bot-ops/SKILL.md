@@ -66,6 +66,13 @@ bash deploy.sh --uninstall             # 移除服務（.env 與 .venv 保留）
 2. 同一支 bot（同 token）可同時在多個伺服器;要完全獨立就另建一個 application + 新 token,再部署一份（同機可多開一個 systemd 服務,改服務名與資料夾）。
 3. 進去後在該伺服器選一個頻道,把頻道 ID 填進 `ALLOWED_CHANNEL_ID`（Discord 設定開「開發者模式」→ 右鍵頻道 → 複製頻道 ID）,`restart`。
 
+## 工具（function calling + MCP）
+
+- 聊天時模型可自己呼叫工具：內建 `web_search` + `mcp_servers.json` 的 MCP server（fetch/time/calculator/wikipedia/arxiv 用 uvx；memory/context7 要 Node.js 18+，沒有就略過）。
+- Discord `!tools` 看狀態；`ENABLE_TOOLS=0` 關掉；`LLM_THINKING=auto` 讓遠端 gateway 保留思考。
+- 不開 Discord 測：`.venv/bin/python selftest.py`（MCP）、`selftest.py --llm`（實際問模型，確認會呼叫工具）。
+- systemd 服務的 PATH 由 deploy.sh 寫入（含 `~/.local/bin` 與 npx 所在目錄）；之後才裝 Node.js 要重跑 deploy.sh。
+
 ## 常見錯誤對照
 
 - `LoginFailure` → `DISCORD_BOT_TOKEN` 貼錯。

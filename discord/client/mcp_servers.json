@@ -1,0 +1,54 @@
+{
+  "_說明": "bot 啟動時會依序啟動 enabled=true 的 MCP server（stdio）。指令找不到（例如沒裝 Node.js 的 npx）會自動略過。${BOT_DIR} = 這個資料夾。改完重啟 bot。",
+  "servers": {
+    "fetch": {
+      "_用途": "讀取網頁內容（轉成 Markdown），使用者貼網址時用",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "enabled": true
+    },
+    "time": {
+      "_用途": "查目前時間、時區換算",
+      "command": "uvx",
+      "args": ["mcp-server-time", "--local-timezone", "Asia/Taipei"],
+      "enabled": true
+    },
+    "calculator": {
+      "_用途": "精確計算數學式，避免模型心算出錯",
+      "command": "uvx",
+      "args": ["mcp-server-calculator"],
+      "enabled": true
+    },
+    "wikipedia": {
+      "_用途": "查維基百科條目、摘要",
+      "command": "uvx",
+      "args": ["wikipedia-mcp"],
+      "enabled": true
+    },
+    "arxiv": {
+      "_用途": "搜尋 / 下載 / 閱讀 arXiv 論文",
+      "command": "uvx",
+      "args": ["arxiv-mcp-server", "--storage-path", "${BOT_DIR}/data/arxiv"],
+      "enabled": true
+    },
+    "memory": {
+      "_用途": "長期記憶（知識圖譜存在 data/memory.jsonl）；注意：所有頻道、所有伺服器共用同一份",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "env": {"MEMORY_FILE_PATH": "${BOT_DIR}/data/memory.jsonl"},
+      "enabled": true
+    },
+    "context7": {
+      "_用途": "查程式套件的最新官方文件與範例（免金鑰，有流量限制）",
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp"],
+      "enabled": true
+    },
+    "sequential-thinking": {
+      "_用途": "逐步思考工具；Kimi 這類本身會思考的模型用不到，本地小模型（關掉思考時）可以打開",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "enabled": false
+    }
+  }
+}
