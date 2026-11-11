@@ -56,6 +56,8 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
 GOOGLE_CSE_ID  = os.getenv("GOOGLE_CSE_ID", "").strip()
 # 讓模型自己呼叫工具（內建 web_search + mcp_servers.json 的 MCP server）
 ENABLE_TOOLS   = os.getenv("ENABLE_TOOLS", "1").strip() not in ("0", "false", "False", "")
+# 用工具時的進度顯示：brief = 一則「查資料中…」訊息、答完自動刪掉；off = 不顯示
+TOOL_STATUS    = os.getenv("TOOL_STATUS", "brief").strip().lower()
 TW_TZ          = timezone(timedelta(hours=8))
 
 
@@ -149,7 +151,52 @@ def web_search(query: str, n: int = 5) -> str:
 
 
 # --- 工具（給模型呼叫）------------------------------------------------------
+_WMO = {0: "晴", 1: "大致晴", 2: "多雲", 3: "陰", 45: "霧", 48: "霧淞", 51: "毛毛雨", 53: "毛毛雨", 55: "毛毛雨",
+        61: "小雨", 63: "中雨", 65: "大雨", 66: "凍雨", 67: "凍雨", 71: "小雪", 73: "中雪", 75: "大雪",
+        80: "陣雨", 81: "陣雨", 82: "強陣雨", 95: "雷雨", 96: "雷雨伴冰雹", 99: "雷雨伴冰雹"}
+
+
+def get_weather(location: str, days: int = 3) -> str:
+    """Open-Meteo（免費、免金鑰）：先地名轉經緯度，再查目前天氣與每日預報。"""
+    days = max(1, min(int(days), 7))
+    g = requests.get("https://geocoding-api.open-meteo.com/v1/search",
+                     params={"name": location, "count": 1, "language": "zh"}, timeout=15)
+    g.raise_for_status()
+    hits = g.json().get("results") or []
+    if not hits:
+        return f"找不到地點「{location}」，請改用英文地名（例如 Hsinchu）再試"
+    p = hits[0]
+    f = requests.get("https://api.open-meteo.com/v1/forecast", params={
+        "latitude": p["latitude"], "longitude": p["longitude"], "timezone": "auto", "forecast_days": days,
+        "current": "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m",
+        "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max",
+    }, timeout=15)
+    f.raise_for_status()
+    d = f.json()
+    c, dl = d["current"], d["daily"]
+    place = "、".join(x for x in (p.get("name"), p.get("admin1"), p.get("country")) if x)
+    lines = [f"地點：{place}（資料：Open-Meteo，https://open-meteo.com）",
+             f"現在（{c['time']}）：{_WMO.get(c['weather_code'], c['weather_code'])}，{c['temperature_2m']}°C"
+             f"（體感 {c['apparent_temperature']}°C），濕度 {c['relative_humidity_2m']}%，風速 {c['wind_speed_10m']} km/h"]
+    for i, day in enumerate(dl["time"]):
+        lines.append(f"{day}：{_WMO.get(dl['weather_code'][i], dl['weather_code'][i])}，"
+                     f"{dl['temperature_2m_min'][i]}~{dl['temperature_2m_max'][i]}°C，"
+                     f"降雨機率 {dl['precipitation_probability_max'][i]}%，最大風速 {dl['wind_speed_10m_max'][i]} km/h")
+    return "\n".join(lines)
+
+
 BUILTIN_TOOLS: agent.Builtin = {
+    "get_weather": (
+        {"type": "function", "function": {
+            "name": "get_weather",
+            "description": "查某地目前天氣與未來幾天預報（溫度、降雨機率、風速）。使用者問天氣時直接用這個，一次就夠，不必再搜尋網頁。",
+            "parameters": {"type": "object", "properties": {
+                "location": {"type": "string", "description": "城市名，英文較準，例如 Hsinchu、Taipei、Tokyo"},
+                "days": {"type": "integer", "description": "預報天數 1~7，預設 3"},
+            }, "required": ["location"]},
+        }},
+        get_weather,
+    ),
     "web_search": (
         {"type": "function", "function": {
             "name": "web_search",
@@ -174,7 +221,8 @@ def system_prompt() -> str:
          "你在 Discord 上回覆，可以用 Markdown，但不要用表格（Discord 不支援）。")
     if ENABLE_TOOLS and agent.tools_supported():
         s += ("\n你可以呼叫工具。遇到需要最新資訊、查證事實、使用者貼了網址、論文、精確計算時，先用工具再回答，"
-              "並在回答附上資料來源網址；能直接回答的簡單問題就不要用工具。不要捏造工具沒查到的內容。")
+              "並在回答附上資料來源網址；能直接回答的簡單問題就不要用工具。不要捏造工具沒查到的內容。"
+              "用最少的工具呼叫拿到答案：資料夠了就回答，不要為了更精確反覆搜尋。回答要精簡。")
     return s
 
 
@@ -315,7 +363,8 @@ async def cmd_tools(channel):
     if not agent.tools_supported():
         await channel.send("⚠️ 目前的模型服務不支援工具呼叫（tools 參數被拒絕），只能一般聊天。")
         return
-    lines = ["**🔧 可用工具**", "✅ `web_search`：內建網路搜尋"] + mcp.status_lines()
+    lines = ["**🔧 可用工具**", "✅ `web_search`：內建網路搜尋", "✅ `get_weather`：內建天氣（Open-Meteo）"] \
+        + mcp.status_lines()
     n = len(BUILTIN_TOOLS) + len(mcp.openai_tools())
     text = "\n".join(lines) + f"\n\n共 {n} 個工具，模型會自己決定要不要用。設定檔：`mcp_servers.json`"
     for part in chunk_text(text):
@@ -431,19 +480,30 @@ async def cmd_chat(message: discord.Message, content: str, do_web: bool):
             msgs = [{"role": "system", "content": system_prompt()}] + _trim(
                 hist + [{"role": "user", "content": user_content}])
 
-            used: list[str] = []
             status: list[discord.Message] = []
+            count = [0]
 
             async def on_tool(name: str, brief: str):
-                used.append(f"`{name}`" + (f" {brief}" if brief else ""))
-                text = "🔧 " + "\n🔧 ".join(used[-8:])
+                # 只用一則訊息顯示進度（off=不顯示），答案出來後刪掉
+                count[0] += 1
+                if TOOL_STATUS == "off":
+                    return
+                label = name.split("__")[-1]
+                text = f"🔍 查資料中…（第 {count[0]} 步：{label}）"
                 if status:
                     await status[0].edit(content=text)
                 else:
-                    status.append(await channel.send(text))
+                    status.append(await channel.send(text, silent=True))
 
-            answer = tw(await agent.run(msgs, mcp=mcp, builtins=BUILTIN_TOOLS,
-                                        on_tool=on_tool, use_tools=ENABLE_TOOLS))
+            try:
+                answer = tw(await agent.run(msgs, mcp=mcp, builtins=BUILTIN_TOOLS,
+                                            on_tool=on_tool, use_tools=ENABLE_TOOLS))
+            finally:
+                for m in status:
+                    try:
+                        await m.delete()
+                    except discord.DiscordException:
+                        pass
         except Exception as e:  # noqa: BLE001
             await channel.send(friendly_error(e))
             return

@@ -160,12 +160,13 @@ curl -s https://inner-medusa.genai.nchc.org.tw/v1/models -H "Authorization: Bear
 
 ### 工具（function calling + MCP）
 
-一般聊天時，bot 會把工具清單一起送給模型（OpenAI `tools` 參數），模型想用工具時 bot 執行後把結果餵回去，最多 `MAX_TOOL_ROUNDS` 輪。用到的工具會在 Discord 顯示 🔧。
+一般聊天時，bot 會把工具清單一起送給模型（OpenAI `tools` 參數），模型想用工具時 bot 執行後把結果餵回去，最多 `MAX_TOOL_ROUNDS` 輪。查資料時 Discord 只顯示一則「🔍 查資料中…」，答案出來後自動刪掉（`TOOL_STATUS=off` 不顯示）。
 模型服務不接受 `tools` 參數時，bot 會自動退回一般聊天。
 
 | 工具 | 來源 | 用途 | 需要 |
 |------|------|------|------|
 | `web_search` | 內建 | 網路搜尋（Google CSE，沒金鑰用 DuckDuckGo） | — |
+| `get_weather` | 內建 | 目前天氣與 1~7 天預報（Open-Meteo，免金鑰） | — |
 | `fetch` | `uvx mcp-server-fetch` | 讀網頁全文 | uv |
 | `time` | `uvx mcp-server-time` | 現在時間、時區換算 | uv |
 | `calculator` | `uvx mcp-server-calculator` | 精確計算 | uv |
