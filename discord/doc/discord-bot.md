@@ -141,6 +141,8 @@ curl -s https://inner-medusa.genai.nchc.org.tw/v1/models -H "Authorization: Bear
 | @提及 / 私訊 / 直接發言 | 聊天；模型會自己決定要不要用工具（見下方「工具」） |
 | `!web <問題>` | 強制先上網搜尋再回答 |
 | `!tools` | 列出目前可用的工具與 MCP server 狀態 |
+| `!skills` / `!skill <名稱>` | 列出技能 / 看某個技能內容 |
+| `!skill del <名稱>` | 刪除技能（限管理員） |
 | `!ppt <主題>` | 產生簡報 .pptx（16:9，含講者備註） |
 | `!word 計畫 <題目>` | 國科會專題研究計畫草稿（背景、文獻、方法、甘特圖…） |
 | `!word 報告 <主題>` | 課堂報告 .docx |
@@ -179,6 +181,17 @@ curl -s https://inner-medusa.genai.nchc.org.tw/v1/models -H "Authorization: Bear
 - 全部免費、免金鑰。開關與參數在 [`mcp_servers.json`](../client/mcp_servers.json)，改完重啟 bot；找不到指令（例如沒裝 Node.js）的會自動略過。
 - 第一次啟動時 uvx / npx 要下載套件，工具會在 bot 上線後 1~3 分鐘內陸續就緒（`!tools` 看狀態）。
 - 安全：工具參數裡指向內網 / 本機的網址會被擋掉（`BLOCK_PRIVATE_URLS=1`），避免有人叫 bot 讀 vLLM 或實驗室內部服務。注意這只檢查參數裡的網址，擋不住外部網站轉址到內網。
+### 技能庫（越用越會）
+
+模型本身不會學習，但 bot 會把「好用的做法」存成技能，之後每次回答都把技能清單放進 system prompt，相關時模型會讀出來照做。
+
+1. 有人教 bot 做法（例如「以後查活動先看官方日文新聞頁，記成技能」），或模型自己摸索出有效查法時，模型呼叫 `propose_skill` 提案。
+2. bot 在頻道貼出提案內容並加上 ✅ ❌。**只有具「管理員」或「管理伺服器」權限的人按的才算**，一般成員按無效。
+3. 核准後存成 `data/skills/<名稱>.md`，立即生效；同名提案＝修改既有技能。
+4. 私訊裡無法核准（沒有管理員）。等待中的提案只存在記憶體，bot 重啟後要重新提案。
+5. 管理員也可以直接編輯 `data/skills/` 裡的檔案，不用重啟。上限：每個技能 3000 字（`MAX_SKILL_CHARS`）、共 50 個（`MAX_SKILLS`）。
+6. bot 要有「管理訊息」權限才能在審核完清掉 ✅ ❌；沒有也能正常運作。
+
 - 不開 Discord 也能測：`.venv/bin/python selftest.py`（測 MCP）、`.venv/bin/python selftest.py --llm`（再用 `.env` 的模型實測工具呼叫）。
 
 ---
@@ -235,7 +248,8 @@ bot 會自動讀主機的金鑰（Ubuntu 直接讀 `~/vllm-server/vllm.env`、Wi
 | `agent.py` | 工具呼叫迴圈（模型 ↔ 工具） |
 | `mcp_client.py` / `mcp_servers.json` | 連 MCP server、工具清單與設定 |
 | `selftest.py` | 不開 Discord 測工具與模型 |
-| `data/` | MCP 資料：長期記憶、arXiv 論文（不進 git） |
+| `skills.py` | 技能庫（存取 `data/skills/`、提案驗證） |
+| `data/` | 技能、長期記憶、arXiv 論文（不進 git） |
 | `office_gen.py` | JSON schema、提示詞、pptx/docx/xlsx 排版 |
 | `deploy.ps1` | Windows 筆電一鍵部署 |
 | `deploy.sh` | Ubuntu 伺服器一鍵部署（含 systemd 服務 `discord-bot`） |

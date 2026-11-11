@@ -38,6 +38,7 @@ import agent  # noqa: E402
 import llm_client  # noqa: E402
 import mcp_client  # noqa: E402
 import office_gen  # noqa: E402
+import skills  # noqa: E402
 
 # --- 讀設定 -----------------------------------------------------------------
 TOKEN          = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
@@ -223,7 +224,69 @@ def system_prompt() -> str:
         s += ("\n你可以呼叫工具。遇到需要最新資訊、查證事實、使用者貼了網址、論文、精確計算時，先用工具再回答，"
               "並在回答附上資料來源網址；能直接回答的簡單問題就不要用工具。不要捏造工具沒查到的內容。"
               "用最少的工具呼叫拿到答案：資料夠了就回答，不要為了更精確反覆搜尋。回答要精簡。")
+        s += skills.prompt_section()
     return s
+
+
+# --- 技能庫：模型可以讀技能、提案新技能（管理員按 ✅ 才生效）---------------
+APPROVE, REJECT = "✅", "❌"
+# 等待核准的提案：Discord 訊息 ID → {name, description, content, proposer}（存在記憶體，bot 重啟就失效）
+pending_skills: dict[int, dict] = {}
+
+
+def skill_tools(proposals: list[dict], proposer: str) -> agent.Builtin:
+    """每次對話一份：propose_skill 只先收集起來，回答送出後再貼到頻道請管理員核准。"""
+    def read_skill(name: str) -> str:
+        sk = skills.get_skill(name)
+        return sk[1] if sk else f"沒有名為 {name} 的技能；現有技能：{', '.join(n for n, _ in skills.list_skills()) or '（無）'}"
+
+    def propose_skill(name: str, description: str, content: str) -> str:
+        why = skills.validate(name, description, content)
+        if why:
+            return f"提案不合格：{why}"
+        if len(proposals) >= 2:
+            return "這次對話已經提案太多了，請先等管理員審核"
+        proposals.append({"name": skills.safe_name(name), "description": description.strip(),
+                          "content": content.strip(), "proposer": proposer})
+        return "已送出提案，管理員按 ✅ 核准後才會生效。請在回答中簡短告訴使用者你提案了什麼技能。"
+
+    return {
+        "read_skill": ({"type": "function", "function": {
+            "name": "read_skill",
+            "description": "讀取技能庫裡某個技能的完整做法。問題和技能清單中的某項相關時先讀。",
+            "parameters": {"type": "object", "properties": {
+                "name": {"type": "string", "description": "技能名稱（技能清單上的名字）"},
+            }, "required": ["name"]},
+        }}, read_skill),
+        "propose_skill": ({"type": "function", "function": {
+            "name": "propose_skill",
+            "description": "提案新增技能，或用同名覆蓋來修改既有技能。要 Discord 管理員核准才會生效。"
+                           "內容寫成可重複使用的步驟、推薦資料來源與注意事項，精簡為主。",
+            "parameters": {"type": "object", "properties": {
+                "name": {"type": "string", "description": "技能名稱，簡短英文或中文，例如 pikmin-events"},
+                "description": {"type": "string", "description": "一句話：什麼情況下要用這個技能"},
+                "content": {"type": "string", "description": "技能內容（Markdown，3000 字以內）"},
+            }, "required": ["name", "description", "content"]},
+        }}, propose_skill),
+    }
+
+
+def is_admin(member) -> bool:
+    perms = getattr(member, "guild_permissions", None)
+    return bool(perms and (perms.administrator or perms.manage_guild))
+
+
+async def post_proposal(channel, p: dict):
+    old = skills.get_skill(p["name"])
+    head = "✏️ **技能修改提案**" if old else "🧠 **新技能提案**"
+    body = p["content"] if len(p["content"]) <= 1400 else p["content"][:1400] + "\n…（完整內容核准後可用 !skill 查看）"
+    text = (f"{head}：`{p['name']}`（由 {p['proposer']} 的對話產生）\n"
+            f"說明：{p['description']}\n```md\n{body.replace('```', 'ʼʼʼ')}\n```\n"
+            f"管理員按 {APPROVE} 核准、{REJECT} 拒絕。")
+    msg = await channel.send(text[:2000])
+    pending_skills[msg.id] = p
+    for emoji in (APPROVE, REJECT):
+        await msg.add_reaction(emoji)
 
 
 # --- 參考資料：附件 / 被回覆的訊息 -----------------------------------------
@@ -312,6 +375,7 @@ HELP_TEXT = """**📖 使用說明**
 • 直接聊天：@我、私訊，或在指定頻道發言；我會視需要自己上網搜尋、讀網址、查維基 / arXiv、計算
 • `!web <問題>`：強制先上網搜尋再回答
 • `!tools`：看目前能用哪些工具
+• `!skills`：看我學會的技能；`!skill <名稱>` 看內容（教我做法時說「記成技能」，管理員按 ✅ 才生效）
 • `!ppt <主題>`：產生簡報 .pptx（含講者備註）
 • `!word 計畫 <題目>`：國科會研究計畫草稿 .docx
 • `!word 報告 <主題>`：課堂報告 .docx
@@ -495,8 +559,10 @@ async def cmd_chat(message: discord.Message, content: str, do_web: bool):
                 else:
                     status.append(await channel.send(text, silent=True))
 
+            proposals: list[dict] = []
+            tools = {**BUILTIN_TOOLS, **skill_tools(proposals, message.author.display_name)}
             try:
-                answer = tw(await agent.run(msgs, mcp=mcp, builtins=BUILTIN_TOOLS,
+                answer = tw(await agent.run(msgs, mcp=mcp, builtins=tools,
                                             on_tool=on_tool, use_tools=ENABLE_TOOLS))
             finally:
                 for m in status:
@@ -514,6 +580,69 @@ async def cmd_chat(message: discord.Message, content: str, do_web: bool):
     hist[:] = _trim(hist)
 
     for part in chunk_text(answer):
+        await channel.send(part)
+
+    for p in proposals:
+        if message.guild is None:
+            await channel.send(f"🧠 有一個技能提案 `{p['name']}`，但私訊裡沒有管理員能核准，請到伺服器頻道再教我一次。")
+            break
+        await post_proposal(channel, p)
+
+
+@client.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    """管理員在技能提案上按 ✅ / ❌。"""
+    p = pending_skills.get(payload.message_id)
+    emoji = str(payload.emoji)
+    if not p or payload.user_id == client.user.id or emoji not in (APPROVE, REJECT):
+        return
+    if not is_admin(payload.member):
+        return   # 一般成員按的不算
+    channel = client.get_channel(payload.channel_id) or await client.fetch_channel(payload.channel_id)
+    msg = await channel.fetch_message(payload.message_id)
+    who = payload.member.display_name
+    pending_skills.pop(payload.message_id, None)
+    if emoji == APPROVE:
+        why = skills.validate(p["name"], p["description"], p["content"])
+        if why:
+            await msg.reply(f"⚠️ 無法儲存技能 `{p['name']}`：{why}")
+            return
+        name = await run_blocking(skills.save_skill, p["name"], p["description"], p["content"])
+        await msg.edit(content=msg.content.rsplit("\n", 1)[0] + f"\n{APPROVE} 已由 **{who}** 核准，技能 `{name}` 生效。")
+    else:
+        await msg.edit(content=msg.content.rsplit("\n", 1)[0] + f"\n{REJECT} 已由 **{who}** 拒絕。")
+    try:
+        await msg.clear_reactions()
+    except discord.DiscordException:
+        pass   # bot 沒有「管理訊息」權限就留著
+
+
+async def cmd_skills(message: discord.Message, arg: str):
+    """!skills 列出；!skill <名稱> 看內容；!skill del <名稱> 刪除（管理員）。"""
+    channel = message.channel
+    sub, _, rest = arg.partition(" ")
+    if sub.lower() in ("del", "delete", "rm", "刪除"):
+        if not is_admin(message.author):
+            await channel.send("⛔ 只有管理員可以刪除技能。")
+            return
+        ok = await run_blocking(skills.delete_skill, rest.strip())
+        await channel.send(f"🗑️ 已刪除技能 `{rest.strip()}`。" if ok else f"找不到技能 `{rest.strip()}`，用 `!skills` 查名稱。")
+        return
+    if arg:
+        sk = await run_blocking(skills.get_skill, arg)
+        if not sk:
+            await channel.send(f"找不到技能 `{arg}`，用 `!skills` 查名稱。")
+            return
+        for part in chunk_text(f"🧠 **{skills.safe_name(arg)}**：{sk[0]}\n\n{sk[1]}"):
+            await channel.send(part)
+        return
+    items = await run_blocking(skills.list_skills)
+    if not items:
+        await channel.send("🧠 技能庫還是空的。教我做法時說「把這個做法記成技能」，管理員核准後就會保留下來。")
+        return
+    text = f"🧠 **技能庫**（共 {len(items)} 個）\n" + "\n".join(f"• `{n}`：{d}" for n, d in items) \
+        + "\n\n`!skill <名稱>` 看內容；管理員可用 `!skill del <名稱>` 刪除。"
+    for part in chunk_text(text):
         await channel.send(part)
 
 
@@ -545,6 +674,9 @@ async def on_message(message: discord.Message):
         return
     if cmd == "!tools":
         await cmd_tools(message.channel)
+        return
+    if cmd in ("!skills", "!skill"):
+        await cmd_skills(message, arg)
         return
     if cmd == "!status":
         await cmd_model(message.channel, "")
