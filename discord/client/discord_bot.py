@@ -34,8 +34,9 @@ import requests
 from dotenv import load_dotenv
 
 # 先讀 .env，llm_client / office_gen 在 import 時會讀環境變數
+# 多實例：systemd 用 BOT_ENV_FILE 指定各支 bot 的設定檔（.env.<名稱>）；沒設就用預設 .env
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
+load_dotenv(os.environ.get("BOT_ENV_FILE") or os.path.join(BASE_DIR, ".env"), override=True)
 
 import agent  # noqa: E402
 import llm_client  # noqa: E402
