@@ -139,6 +139,7 @@ curl -s https://inner-medusa.genai.nchc.org.tw/v1/models -H "Authorization: Bear
 | 指令 | 說明 |
 |------|------|
 | @提及 / 私訊 / 直接發言 | 聊天；模型會自己決定要不要用工具（見下方「工具」） |
+| 傳圖片（可同時打字問問題） | 用 `VISION_MODEL` 看圖回答（OCR、辨識內容）；需先在 `.env` 設 `VISION_MODEL` |
 | `!web <問題>` | 強制先上網搜尋再回答 |
 | `!tools` | 列出目前可用的工具與 MCP server 狀態 |
 | `!skills` / `!skill <名稱>` | 列出技能 / 看某個技能內容 |
@@ -234,6 +235,8 @@ bot 會自動讀主機的金鑰（Ubuntu 直接讀 `~/vllm-server/vllm.env`、Wi
 | `WSL_DISTRO` | 只有 Windows 用：vLLM 所在的 WSL 發行版（deploy.ps1 自動填） |
 | `LLM_API_KEY` | 留空 = 自動讀主機的 vllm.env（建議，本地 vLLM）；**接遠端 gateway 時要填**該服務金鑰 |
 | `LLM_MODEL` | 指定模型名稱；留空＝自動用 `/v1/models` 第一個（本地 vLLM 建議留空）；多模型 gateway 填要用的那個 |
+| `VISION_MODEL` | 看圖片用的視覺模型；留空＝不處理圖片。訊息有附圖時才切到它（一般聊天仍用 `LLM_MODEL`）。NCHC 例：`Mistral-Small-3.2-24B-Instruct-2506` |
+| `MAX_IMAGE_MB` | 單張圖片大小上限（MB），預設 8，超過略過 |
 | `SYSTEM_PROMPT` | bot 個性 |
 | `MAX_HISTORY` / `HISTORY_MAX_CHARS` | 對話記憶則數和總字數上限（`deploy.sh --remote` 會從 10 / 8000 放大成 30 / 40000） |
 | `LLM_THINKING` | `auto`（預設）＝本地 vLLM 關思考求快、遠端 gateway 保留思考；`off` / `on` 強制 |
@@ -253,6 +256,7 @@ bot 會自動讀主機的金鑰（Ubuntu 直接讀 `~/vllm-server/vllm.env`、Wi
 | Discord 顯示「連不上 vLLM」 | 主機執行 `vllmctl status`（Windows：雙擊 `server\wsl2\vllmctl.cmd`；Ubuntu：`bash ~/local-llm/server/vllm/vllmctl.sh status`）；沒在跑就 `start` |
 | bot 沒上線（Ubuntu） | `journalctl -u discord-bot -n 30`：`LoginFailure` = token 貼錯；`PrivilegedIntentsRequired` = 沒開 MESSAGE CONTENT INTENT |
 | 回答出現 `404` / 找不到模型 | `LLM_MODEL` 或 `!model` 指定的名稱在服務上不存在；用 `!models` 查正確名稱 |
+| 傳圖片沒反應 / 說看不到圖 | `.env` 沒設 `VISION_MODEL`，或設到非視覺模型；設成多模態模型（如 `Mistral-Small-3.2-24B-Instruct-2506`）再 `restart` |
 | 接遠端 gateway 連不上 | 檢查 `.env` 的 `LLM_BASE_URL` / `LLM_API_KEY`；用 `curl -s <URL>/models -H "Authorization: Bearer <KEY>"` 測試 |
 | 每則訊息被回兩次 | 兩台主機用了同一個 token：各建一個 Application，或停掉其中一台 |
 | 顯示「API 金鑰錯誤」 | `.env` 的 `LLM_API_KEY` 清空，重啟 bot |

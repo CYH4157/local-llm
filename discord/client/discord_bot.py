@@ -5,6 +5,7 @@ discord_bot.py — 把實驗室主機上的 vLLM（opencode 共用的那台）�
 指令：
     (直接聊天)                在允許的頻道發訊息、@提及 bot、或私訊 → 問答；模型會自己決定要不要用工具
                               （搜尋、讀網頁、維基、arXiv、計算、時間、長期記憶… 見 mcp_servers.json）
+    (附圖片)                  訊息帶圖片附件時，改用 VISION_MODEL（.env）看圖回答（OCR、看圖說明）
     !web <問題>               強制先上網搜尋再回答
     !tools                    列出目前可用的工具 / MCP server 狀態
     !ppt <主題/需求>          產生 PowerPoint (.pptx)
@@ -20,6 +21,7 @@ discord_bot.py — 把實驗室主機上的 vLLM（opencode 共用的那台）�
 """
 
 import asyncio
+import base64
 import functools
 import io
 import json
@@ -60,6 +62,10 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
 GOOGLE_CSE_ID  = os.getenv("GOOGLE_CSE_ID", "").strip()
 # 讓模型自己呼叫工具（內建 web_search + mcp_servers.json 的 MCP server）
 ENABLE_TOOLS   = os.getenv("ENABLE_TOOLS", "1").strip() not in ("0", "false", "False", "")
+# 看圖用的視覺模型（留空=不處理圖片）。一般聊天仍用 LLM_MODEL，訊息有附圖時才切到這個。
+VISION_MODEL   = os.getenv("VISION_MODEL", "").strip()
+# 單張圖片大小上限（MB），超過就略過
+MAX_IMAGE_MB   = int(os.getenv("MAX_IMAGE_MB", "8"))
 # 用工具時的進度顯示：brief = 一則「查資料中…」訊息、答完自動刪掉；off = 不顯示
 TOOL_STATUS    = os.getenv("TOOL_STATUS", "brief").strip().lower()
 # !ppt：code = 模型寫 python-pptx 程式、在 LXD 沙盒執行並看預覽修正；json = 舊的固定版面
@@ -339,6 +345,7 @@ async def post_proposal(channel, p: dict):
 
 # --- 參考資料：附件 / 被回覆的訊息 -----------------------------------------
 TEXT_EXT = (".txt", ".md", ".csv")
+IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 
 
 def _read_attachment(name: str, data: bytes) -> str:
@@ -390,6 +397,31 @@ async def gather_reference(message: discord.Message) -> tuple[str, list[str]]:
     return ref_text, notes
 
 
+_IMAGE_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+               ".webp": "image/webp", ".gif": "image/gif"}
+
+
+async def gather_images(message: discord.Message) -> tuple[list[str], list[str]]:
+    """把訊息裡的圖片附件讀成 data URL（給視覺模型看）；回傳（data URL 清單, 提示訊息）。"""
+    urls, notes = [], []
+    for att in message.attachments:
+        low = att.filename.lower()
+        ext = next((e for e in IMAGE_EXT if low.endswith(e)), "")
+        if not ext:
+            continue
+        if att.size and att.size > MAX_IMAGE_MB * 1024 * 1024:
+            notes.append(f"圖片 {att.filename} 超過 {MAX_IMAGE_MB}MB，已略過")
+            continue
+        try:
+            data = await att.read()
+        except Exception as e:  # noqa: BLE001
+            notes.append(f"讀取圖片 {att.filename} 失敗：{e}")
+            continue
+        b64 = base64.b64encode(data).decode()
+        urls.append(f"data:{_IMAGE_MIME[ext]};base64,{b64}")
+    return urls, notes
+
+
 # --- 工具 -------------------------------------------------------------------
 def chunk_text(text: str, size: int = 1900) -> list[str]:
     if not text:
@@ -421,6 +453,7 @@ def friendly_error(e: Exception) -> str:
 
 HELP_TEXT = """**📖 使用說明**
 • 直接聊天：@我、私訊，或在指定頻道發言；我會視需要自己上網搜尋、讀網址、查維基 / arXiv、計算
+• 看圖片：直接把圖片**拖進來**（可同時打字問問題），我會看圖回答（OCR、辨識內容）
 • `!web <問題>`：強制先上網搜尋再回答
 • `!tools`：看目前能用哪些工具
 • `!skills`：看我學會的技能；`!skill <名稱>` 看內容（教我做法時說「記成技能」，管理員按 ✅ 才生效）
@@ -589,8 +622,17 @@ async def cmd_chat(message: discord.Message, content: str, do_web: bool):
                     f"參考以下網路搜尋結果回答問題，並在句末標註引用編號 [n]：\n\n"
                     f"{results}\n\n問題：{content}"
                 )
-            msgs = [{"role": "system", "content": system_prompt()}] + _trim(
-                hist + [{"role": "user", "content": user_content}])
+            # 有附圖時收圖（!web 的文字搜尋路徑不收圖）
+            image_urls, img_notes = ([], []) if do_web else await gather_images(message)
+            for n in img_notes:
+                await channel.send(f"（{n}）", silent=True)
+            if image_urls:
+                user_msg = {"role": "user", "content":
+                            [{"type": "text", "text": user_content or "請看這張圖片並回答。"}]
+                            + [{"type": "image_url", "image_url": {"url": u}} for u in image_urls]}
+            else:
+                user_msg = {"role": "user", "content": user_content}
+            msgs = [{"role": "system", "content": system_prompt()}] + _trim(hist + [user_msg])
 
             status: list[discord.Message] = []
             count = [0]
@@ -610,8 +652,16 @@ async def cmd_chat(message: discord.Message, content: str, do_web: bool):
             proposals: list[dict] = []
             tools = {**BUILTIN_TOOLS, **skill_tools(proposals, message.author.display_name)}
             try:
-                answer = tw(await agent.run(msgs, mcp=mcp, builtins=tools,
-                                            on_tool=on_tool, use_tools=ENABLE_TOOLS))
+                if image_urls:
+                    # 有附圖：用視覺模型直接看圖回答（這條路不跑工具迴圈）
+                    if not VISION_MODEL:
+                        answer = ("⚠️ 目前沒有設定看圖的模型。請管理者在 `.env` 設 "
+                                  "`VISION_MODEL`（例如 NCHC 的 `Mistral-Small-3.2-24B-Instruct-2506`）再重啟。")
+                    else:
+                        answer = tw(await run_blocking(llm_client.chat, msgs, model=VISION_MODEL))
+                else:
+                    answer = tw(await agent.run(msgs, mcp=mcp, builtins=tools,
+                                                on_tool=on_tool, use_tools=ENABLE_TOOLS))
             finally:
                 for m in status:
                     try:
@@ -622,8 +672,8 @@ async def cmd_chat(message: discord.Message, content: str, do_web: bool):
             await channel.send(friendly_error(e))
             return
 
-    # 記憶只存原始問題，不存整包搜尋結果，省上下文
-    hist.append({"role": "user", "content": content})
+    # 記憶只存原始問題文字，不存整包搜尋結果或圖片，省上下文
+    hist.append({"role": "user", "content": content or "（使用者傳了一張圖片）"})
     hist.append({"role": "assistant", "content": answer})
     hist[:] = _trim(hist)
 
@@ -804,7 +854,8 @@ async def on_message(message: discord.Message):
     # 一般聊天：私訊、被提及一定回；否則只在允許頻道（或未限制時）回
     should_reply = is_dm or mentioned or ALLOWED_CHANNEL_ID is None \
         or message.channel.id == ALLOWED_CHANNEL_ID
-    if should_reply and content and not content.startswith("!"):
+    has_image = any(a.filename.lower().endswith(IMAGE_EXT) for a in message.attachments)
+    if should_reply and (content or has_image) and not content.startswith("!"):
         await cmd_chat(message, content, do_web=False)
 
 
