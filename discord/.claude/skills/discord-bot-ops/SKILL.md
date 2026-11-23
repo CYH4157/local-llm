@@ -42,6 +42,7 @@ cd ~/local-llm/discord/client
 - `DISCORD_BOT_TOKEN`:Discord Developer Portal → Bot → Reset Token。**必須在該頁開 MESSAGE CONTENT INTENT**,否則收不到訊息。
 - `LLM_BASE_URL` / `LLM_API_KEY`:模型服務網址與金鑰（遠端模式必填金鑰;本地模式留空會自動讀 `~/vllm-server/vllm.env`）。
 - `LLM_MODEL`:指定模型名稱。留空=自動用 `/v1/models` 第一個（本地 vLLM 建議留空）;多模型 gateway 填要用的那個。
+- `VISION_MODEL`:看圖片用的視覺模型（留空=不處理圖片）。使用者傳圖片時才切到它,一般聊天仍用 `LLM_MODEL`。NCHC 例:`Mistral-Small-3.2-24B-Instruct-2506`。純文字模型（如 Kimi）看不到圖。
 - `ALLOWED_CHANNEL_ID`:**留空=每個頻道都自動回（多人伺服器會很吵）**;填一個頻道 ID=只在該頻道自動回,其他頻道要 @bot 或私訊才回。`!` 指令與被 @、私訊一律會回。
 - 其他:`SYSTEM_PROMPT`、`MAX_HISTORY`、`SEARCH_ENGINE` + `GOOGLE_API_KEY`/`GOOGLE_CSE_ID`、字型 `DOC_FONT_*`/`PPT_FONT`。
 

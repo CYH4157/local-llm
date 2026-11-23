@@ -127,7 +127,7 @@ def current_model(refresh: bool = False) -> dict:
 
 def chat_message(messages: list[dict], max_tokens: int | None = None,
                  temperature: float = 0.7, response_format: dict | None = None,
-                 tools: list[dict] | None = None) -> dict:
+                 tools: list[dict] | None = None, model: str | None = None) -> dict:
     """
     回傳模型的完整 message（含 tool_calls / reasoning_content），給工具迴圈用。
     max_tokens=None → 不指定，vLLM 會用「上下文長度 − 輸入長度」當上限，
@@ -135,7 +135,7 @@ def chat_message(messages: list[dict], max_tokens: int | None = None,
     """
     for attempt in (0, 1):
         payload = {
-            "model": current_model(refresh=attempt == 1)["id"],
+            "model": model or current_model(refresh=attempt == 1)["id"],
             "messages": messages,
             "temperature": temperature,
         }
@@ -150,8 +150,8 @@ def chat_message(messages: list[dict], max_tokens: int | None = None,
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
         r = _request("POST", "/chat/completions", timeout=TIMEOUT, json=payload)
-        # 404 = 主機剛換了模型、快取的名字已不存在 → 重抓一次模型名稱
-        if r.status_code == 404 and attempt == 0:
+        # 404 = 主機剛換了模型、快取的名字已不存在 → 重抓一次模型名稱（指定 model 時重試無益，直接報錯）
+        if r.status_code == 404 and attempt == 0 and not model:
             continue
         if r.status_code >= 400:
             if tools and r.status_code in (400, 422) and "tool" in r.text.lower():
@@ -166,8 +166,9 @@ def clean(content: str | None) -> str:
 
 
 def chat(messages: list[dict], max_tokens: int | None = None,
-         temperature: float = 0.7, response_format: dict | None = None) -> str:
-    msg = chat_message(messages, max_tokens, temperature, response_format)
+         temperature: float = 0.7, response_format: dict | None = None,
+         model: str | None = None) -> str:
+    msg = chat_message(messages, max_tokens, temperature, response_format, model=model)
     return clean(msg.get("content"))
 
 
