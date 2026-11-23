@@ -25,6 +25,8 @@
 #          gateway 掛多個模型時，用 --model 指定要用哪個（不指定=清單第一個）
 #    【共用】
 #      --channel <ID>  只在這個頻道自動回一般聊天（其他頻道要 @bot/私訊；留空=每個頻道都回，較吵）
+#      --name <實例>   一台跑多支 bot：各自 .env.<實例> 與服務 discord-bot-<實例>
+#                      例：bash deploy.sh --name novel --token <T> --channel <C>（不給=預設 .env + discord-bot）
 #      --no-service    不註冊 systemd 服務（手動執行：.venv/bin/python discord_bot.py）
 #      --uninstall     停止並移除服務（.env 與 .venv 保留）
 #      （Discord token：Developer Portal → Bot → Reset Token；不是 LLM 的 sk- 金鑰）
@@ -39,10 +41,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 # shellcheck source=../../server/vllm/lib.sh
 . "$REPO/server/vllm/lib.sh"
-BOT_SERVICE=discord-bot
-UNIT="/etc/systemd/system/$BOT_SERVICE.service"
-
-TOKEN="" SERVICE_ON=1 UNINSTALL=0 REMOTE_URL="" REMOTE_KEY="" REMOTE_MODEL="" CHANNEL_ID=""
+TOKEN="" SERVICE_ON=1 UNINSTALL=0 REMOTE_URL="" REMOTE_KEY="" REMOTE_MODEL="" CHANNEL_ID="" INSTANCE=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --token)      TOKEN="$2"; shift 2 ;;
@@ -50,12 +49,22 @@ while [ $# -gt 0 ]; do
         --api-key)    REMOTE_KEY="$2"; shift 2 ;;
         --model)      REMOTE_MODEL="$2"; shift 2 ;;
         --channel)    CHANNEL_ID="$2"; shift 2 ;;
+        --name)       INSTANCE="$2"; shift 2 ;;
         --no-service) SERVICE_ON=0; shift ;;
         --uninstall)  UNINSTALL=1; shift ;;
         -h|--help)    awk 'NR>1 && /^set -euo/{exit} NR>1' "$0"; exit 0 ;;
         *) die "不認得的參數：$1（看說明：bash $0 --help）" ;;
     esac
 done
+
+# 多實例：--name novel → 設定檔 .env.novel + 服務 discord-bot-novel（不給 --name = 預設 .env + discord-bot）
+if [ -n "$INSTANCE" ]; then
+    case "$INSTANCE" in *[!A-Za-z0-9_-]*) die "--name 只能用英數字、- 或 _（收到：$INSTANCE）" ;; esac
+    BOT_SERVICE="discord-bot-$INSTANCE"; ENV_BOT="$HERE/.env.$INSTANCE"
+else
+    BOT_SERVICE="discord-bot"; ENV_BOT="$HERE/.env"
+fi
+UNIT="/etc/systemd/system/$BOT_SERVICE.service"
 [ "$(id -u)" -ne 0 ] || die "請用一般使用者執行（跟 vLLM 同一個帳號；需要時腳本會自己呼叫 sudo）"
 
 if [ "$UNINSTALL" = 1 ]; then
@@ -63,7 +72,7 @@ if [ "$UNINSTALL" = 1 ]; then
     sudo systemctl disable --now "$BOT_SERVICE" 2>/dev/null || true
     sudo rm -f "$UNIT"
     sudo systemctl daemon-reload
-    ok "已移除服務；$HERE/.env 與 .venv 保留（不需要可自行刪除）"
+    ok "已移除服務；$ENV_BOT 與 .venv 保留（不需要可自行刪除）"
     exit 0
 fi
 
@@ -100,8 +109,7 @@ uv pip install --python "$HERE/.venv/bin/python" -r "$HERE/requirements.txt"
 ok "套件安裝完成"
 
 # --- 3. .env ------------------------------------------------------------------
-step "3. 設定檔 .env"
-ENV_BOT="$HERE/.env"
+step "3. 設定檔 $(basename "$ENV_BOT")"
 # KEY=VALUE 寫進 .env：有就取代，沒有就加在最後（值裡的 | 和 & 要跳脫，sed 才不會誤解）
 set_bot_env() {
     local k="$1" v; v="$(printf '%s' "$2" | sed 's/[|&\\]/\\&/g')"
@@ -179,6 +187,7 @@ User=$USER
 WorkingDirectory=$HERE
 Environment=PYTHONUNBUFFERED=1
 Environment=PATH=$SVC_PATH
+Environment=BOT_ENV_FILE=$ENV_BOT
 ExecStart=$HERE/.venv/bin/python $HERE/discord_bot.py
 Restart=always
 RestartSec=10

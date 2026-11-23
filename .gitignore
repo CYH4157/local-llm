@@ -1,5 +1,7 @@
 # === 機密：絕對不能上傳！ ===
 .env
+.env.*
+!.env.example
 
 # === Python ===
 .venv/
