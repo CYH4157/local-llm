@@ -20,6 +20,62 @@ Windows 筆電
 
 - **模型**：bot 每次自動問 vLLM 目前載入哪個模型，筆電用 `vllmctl` 換模型後 **bot 不用改任何設定**。
 - **金鑰**：bot 自動從 WSL 的 `~/vllm-server/vllm.env` 讀取，筆電換金鑰後 **bot 也會自動重讀**。
+- **多實例**：同一台主機可用 `deploy.sh <名稱>` 跑多支獨立 bot（各自 token／頻道／人設），下面「多 Bot 部署」有完整做法。
+
+---
+
+## 多 Bot 部署（Ubuntu 伺服器，例如 H200 上的 novel / webgame / stock / counselor）
+
+在現有 `nchc-bot`（`discord-bot.service`）之外，再跑 4 支獨立 bot。每支 bot 都是**獨立的 Discord Application**，有自己的 token、自己的 systemd 服務，**不可重複使用同一個 token**。
+
+```
+discord/client/deploy-all.sh   # 在伺服器上執行，一次註冊＋啟動 4 支
+```
+
+`deploy-all.sh` 做的事：
+
+| 實例 | 頻道 ID（測試伺服器） | 服務 | 環境檔 |
+|------|------|------|------|
+| `novel` | `1574256936424177745` | `discord-bot-novel.service` | `.env.novel` |
+| `webgame` | `1574257038408810546` | `discord-bot-webgame.service` | `.env.webgame` |
+| `stock` | `1574257090669715526` | `discord-bot-stock.service` | `.env.stock` |
+| `counselor` | `1574257436389548132` | `discord-bot-counselor.service` | `.env.counselor` |
+
+- 複用現有 `deploy.sh <實例>`：每個實例**獨立 venv**（`venv-<名稱>`）、環境檔（`.env.<名稱>`）、systemd 服務（`discord-bot-<名稱>`）。
+- NCHC 連線沿用現有 `.env`（`REMOTE` + `inner-medusa` gateway + `LLM_MODEL_NAME`）。
+- **沒有 token 不會壞事**：若某實例的 `.env.<名稱>` 裡 `DISCORD_BOT_TOKEN` 還是 `______`，腳本會把該服務註冊好但**維持停止**，等你填 token 後重跑 `deploy-all.sh` 就會自動驗證並啟動。
+- **不會動到** `nchc-bot.service`：只在 `discord-bot.service` 不存在時才順手補建。
+
+操作順序：
+
+```bash
+cd ~/local-llm/discord/client
+# 1) 填 token：編輯 .env.novel / .env.webgame / .env.stock / .env.counselor
+#    把 DISCORD_BOT_TOKEN=______ 換成各 bot 的 token
+# 2) 一次部署（需要 sudo，會裝依賴、建 venv、註冊並啟動服務）
+sudo -v && bash deploy-all.sh
+# 3) 看狀態 / log
+systemctl status 'discord-bot-*' --no-pager
+journalctl -u discord-bot-novel -f
+```
+
+日常維運（重啟、停、log）與單一 bot 相同，只是服務名改成 `discord-bot-<名稱>`，例如：
+
+```bash
+sudo systemctl restart discord-bot-stock
+journalctl -u discord-bot-stock -f
+```
+
+之後要加新人設：改 `deploy-all.sh` 的 `BOTS` 區塊換 `SYSTEM_PROMPT`，再針對該實例重跑（腳本會覆寫 `.env.<名稱>` 的 `SYSTEM_PROMPT`、頻道與 NCHC 連線，**不會動你已填好的 token**），然後 `sudo systemctl restart discord-bot-<名稱>`。
+
+各 bot 目前的人設（第一階段）：
+
+| Bot | 人設重點 |
+|-----|----------|
+| `novel` | 小說家——主動接話、一起發想角色／世界觀／劇情 |
+| `webgame` | 網站小遊戲教練——用 HTML/CSS/JS 帶新手，步驟拆小、給可執行範例 |
+| `stock` | 股市反指標——熱血、自嘲；第一階段**無即時行情**，不得編造數字 |
+| `counselor` | 陪伴型朋友——先傾聽、1–3 句短回覆，不做醫療診斷 |
 
 ---
 
@@ -279,8 +335,11 @@ bot 會自動讀主機的金鑰（Ubuntu 直接讀 `~/vllm-server/vllm.env`、Wi
 | `data/` | 技能、長期記憶、arXiv 論文（不進 git） |
 | `office_gen.py` | JSON schema、提示詞、pptx/docx/xlsx 排版 |
 | `deploy.ps1` | Windows 筆電一鍵部署 |
-| `deploy.sh` | Ubuntu 伺服器一鍵部署（含 systemd 服務 `discord-bot`） |
+| `deploy.sh` | Ubuntu 伺服器一鍵部署（含 systemd 服務 `discord-bot`、多實例） |
+| `deploy-all.sh` | 一次部署 novel / webgame / stock / counselor 四支 bot（不治 token） |
 | `install-autostart.ps1` | Windows：bot 開機自動啟動 |
 | `run-bot.ps1` / `start-bot.bat` | 手動啟動 bot |
 | `templates/` | 實驗室自訂範本（選用） |
 | `outputs/` | 產出的檔案（不進 git） |
+| `.cache/discord-uploads/` | 使用者上傳附件的長期保存（不進 git；`!reset` / 重啟不清除） |
+| `.env.<實例>` | 各 bot 環境檔（不進 git；token 手填） |
